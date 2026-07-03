@@ -84,4 +84,63 @@ test.describe('Phase 2 — library, cross-file sessions, follow-ups & persisted 
     await expect(thread).toContainText('combined total revenue')
     await expect(thread.getByTestId('answer-summary').first()).toContainText(COMBINED_TOTAL_REGEX)
   })
+
+  // Regression: the backend persists rejected uploads (e.g. a non-CSV) with
+  // status "error" and null row/column counts. The library must render such a
+  // dataset as a visible failed state and NOT crash the whole page by calling
+  // .toLocaleString() on null. See LibrarySidebar guard.
+  test('library renders an errored dataset (null counts) without crashing the page', async ({ page }) => {
+    // Force the library GET to include a failed upload with null counts.
+    await page.route('**/datasets', async (route, request) => {
+      if (request.method() !== 'GET') return route.fallback()
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            datasets: [
+              {
+                dataset_id: 'failed-1',
+                filename: 'report.xlsx',
+                row_count: null,
+                column_count: null,
+                status: 'error',
+                created_at: '2026-07-03T00:00:00Z',
+              },
+              {
+                dataset_id: 'ok-1',
+                filename: 'good.csv',
+                row_count: 1234,
+                column_count: 5,
+                status: 'ready',
+                created_at: '2026-07-03T00:00:00Z',
+              },
+            ],
+          },
+          error: null,
+        }),
+      })
+    })
+
+    await page.goto('./')
+
+    // The page did NOT crash into React's client-side exception fallback.
+    await expect(page.getByRole('heading', { name: 'Data Analyst Agent' })).toBeVisible()
+    await expect(page.locator('text=Application error')).toHaveCount(0)
+
+    const sidebar = page.getByTestId('library-sidebar')
+    await expect(sidebar).toBeVisible()
+
+    // The errored dataset is listed with a clear failed marker and no counts.
+    const failedItem = page.getByTestId('library-item').filter({ hasText: 'report.xlsx' })
+    await expect(failedItem).toBeVisible()
+    await expect(failedItem.getByTestId('library-item-failed')).toBeVisible()
+    // ...and it is NOT selectable (no checkbox to add it to a session).
+    await expect(failedItem.getByTestId('library-item-checkbox')).toHaveCount(0)
+
+    // The healthy dataset still renders its numeric counts and a checkbox.
+    const okItem = page.getByTestId('library-item').filter({ hasText: 'good.csv' })
+    await expect(okItem).toContainText('1,234 rows')
+    await expect(okItem.getByTestId('library-item-checkbox')).toBeVisible()
+  })
 })

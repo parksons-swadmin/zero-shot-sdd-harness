@@ -34,8 +34,8 @@ export interface CleaningReport {
 export interface DatasetResponse {
   dataset_id: string
   filename: string
-  row_count: number
-  column_count: number
+  row_count: number | null
+  column_count: number | null
   status: string
   profile: Profile
   cleaning_report: CleaningReport
@@ -74,8 +74,8 @@ export interface MessageResponse {
 export interface DatasetListItem {
   dataset_id: string
   filename: string
-  row_count: number
-  column_count: number
+  row_count: number | null
+  column_count: number | null
   status: string
   created_at: string
 }

@@ -93,25 +93,45 @@ export default function LibrarySidebar({
       {loadState === 'ready' && datasets.length > 0 && (
         <>
           <ul className="max-h-72 space-y-1 overflow-y-auto">
-            {datasets.map(ds => (
-              <li key={ds.dataset_id} data-testid="library-item">
-                <label className="flex cursor-pointer items-start gap-2 rounded p-1.5 text-sm hover:bg-gray-50">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={checked.has(ds.dataset_id)}
-                    onChange={() => toggle(ds.dataset_id)}
-                    data-testid="library-item-checkbox"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-gray-800">{ds.filename}</span>
-                    <span className="block text-xs text-gray-500">
-                      {ds.row_count.toLocaleString()} rows · {ds.column_count} cols
+            {datasets.map(ds => {
+              // A dataset is unusable when the backend couldn't ingest it:
+              // status "error" or missing row/column counts (e.g. a rejected .xlsx).
+              const failed = ds.status === 'error' || ds.row_count == null || ds.column_count == null
+              return (
+                <li key={ds.dataset_id} data-testid="library-item">
+                  <label
+                    className={`flex items-start gap-2 rounded p-1.5 text-sm ${
+                      failed ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-gray-50'
+                    }`}
+                  >
+                    {failed ? (
+                      // Errored datasets have no usable data — not selectable for a session.
+                      <span className="mt-0.5 inline-block w-4 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={checked.has(ds.dataset_id)}
+                        onChange={() => toggle(ds.dataset_id)}
+                        data-testid="library-item-checkbox"
+                      />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-gray-800">{ds.filename}</span>
+                      {failed ? (
+                        <span className="block text-xs font-medium text-red-600" data-testid="library-item-failed">
+                          Upload failed — couldn&apos;t read this file
+                        </span>
+                      ) : (
+                        <span className="block text-xs text-gray-500">
+                          {ds.row_count!.toLocaleString()} rows · {ds.column_count} cols
+                        </span>
+                      )}
                     </span>
-                  </span>
-                </label>
-              </li>
-            ))}
+                  </label>
+                </li>
+              )
+            })}
           </ul>
 
           <button

@@ -312,7 +312,7 @@ export default function Home() {
               )}
               {uploadState === 'ready' && dataset && (
                 <p className="text-sm font-medium text-green-700">
-                  {dataset.filename} — {dataset.row_count.toLocaleString()} rows, {dataset.column_count} columns
+                  {dataset.filename} — {(dataset.row_count ?? 0).toLocaleString()} rows, {dataset.column_count ?? 0} columns
                 </p>
               )}
               {uploadState === 'error' && <p className="text-sm font-medium text-red-600">Click to try another file</p>}
