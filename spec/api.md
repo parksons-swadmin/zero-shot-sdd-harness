@@ -123,9 +123,29 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
 | 422 | Empty/whitespace-only question |
 | 500 | Rendered as a human-readable error in `query_result.status = "failed"` with a `summary_text` explaining the failure — never a raw stack trace (per `harness/patterns/code.md`) |
 
-### `GET /sessions/{session_id}/messages/{message_id}/stream` *(Phase 3)*
+### `POST /sessions/{session_id}/messages/stream` *(Phase 3c)*
 
-**Purpose:** Server-Sent-Events stream of `step` and `answer_chunk` events for the in-flight/just-completed run, for live progress + streamed answer text.
+**Purpose:** Ask a question and receive a **Server-Sent-Events** stream of live step-progress + streamed answer text, ending with the same authoritative `QueryResultOut` the non-streaming ask returns. This is an **additive, opt-in** variant of `POST /sessions/{session_id}/messages`; that non-streaming endpoint is unchanged and remains the fallback.
+
+> **Why POST + SSE (not `EventSource`, not the earlier `GET .../{message_id}/stream` sketch):** the run needs the question in a request body and *starts* the run, so the browser `EventSource` API (GET-only, no body) cannot be used; and `message_id` does not exist until `finalize` runs at the very end of the graph — the message is created by the run the stream narrates — so a GET-by-message-id stream is impossible. The client consumes this via `fetch()` + `ReadableStream`, splitting on `\n\n`. The `message_id` is delivered in the terminal `result` event. See `spec/roadmap.md` Phase 3c design decision #1.
+
+**Request:** same as the non-streaming ask — `{"question": "What is the total revenue for the West region?"}`
+
+**Response:** `200`, `Content-Type: text/event-stream`. A sequence of SSE frames (`event: <type>\ndata: <one-line JSON>\n\n`) in this order:
+
+| Event | When | `data` payload |
+|-------|------|----------------|
+| `step` | once per graph node entered, as the run advances | `{"index": 1, "node": "load_context", "label": "Loading dataset profiles", "total_estimate": 6}` — `index` is 1-based and increments per real node transition; `label` is a human-readable node label; `total_estimate` is an honest best-effort node count for the "Step N of ~M" display (never a fabricated percentage) |
+| `answer_chunk` | repeatedly during `compose_answer`, as Gemini streams the prose | `{"text": "The total revenue "}` — the concatenation of all `answer_chunk.text` equals the final `summary_text` |
+| `result` | exactly once, after `finalize` | `{"message_id": "uuid", "query_result": { …full QueryResultOut… }}` — the **same** `QueryResultOut` shape the non-streaming ask returns (carries `table`/`chart_spec`/`export_dataset_id`/`key_numbers`/`follow_up_questions`/`anomaly_flags`/`cost`). This is the source of truth; the `answer_chunk`s are progressive UI only |
+| `error` | once instead of `result`, on failure | `{"message": "<human-readable, sanitized>", "status": "failed"}` — mirrors the non-streaming failed-`query_result` behaviour; never a raw stack trace |
+| `done` | terminal, always last | `{}` — sentinel so the client closes the reader cleanly |
+
+**Concurrency:** the stream holds the same per-`session_id` in-flight lock as the non-streaming ask (see `spec/architecture.md` → Concurrency), so a stream cannot overlap another run for the same session; a busy session yields a single `error` event.
+
+**Raw-data boundary:** no event carries raw row values — `step` carries node metadata only, `answer_chunk` carries only the LLM-composed prose (built from capped aggregates, same boundary as `summary_text`), `result` carries the already-boundary-safe `QueryResultOut`. Gate-asserted (`tests/integration/test_phase3c_stream.py`).
+
+**Error cases:** `404` (unknown `session_id`, before streaming begins) and `422` (empty question) are returned as normal JSON errors before the stream starts; a run failure after streaming begins is delivered as an in-stream `error` event with a `200`/`text/event-stream` response.
 
 ### `GET /sessions/{session_id}` *(Phase 2)*
 
@@ -259,9 +279,34 @@ Flags are produced by the existing `compose_answer` Gemini call (an `---ANOMALIE
 
 **Error cases:** none — an empty/over-filtered result returns `{"entries": [], "total": 0, ...}`.
 
-### `GET /cost-summary` *(Phase 3)*
+**`cost` in the answer payload *(Phase 3c)*:** the `query_result.cost` field is **added and populated for real starting Phase 3c** (absent/`null` before). It carries the per-query token/cost total summed from the `CostRecord` rows for that `query_result_id`:
+```json
+"cost": {"prompt_tokens": 2140, "completion_tokens": 180, "estimated_cost_usd": 0.000214}
+```
+It appears in the `POST /sessions/{id}/messages` response, in each assistant turn of `GET /sessions/{id}`, and in the streaming `result` event — one field, one place (per-query). Aggregate running totals are a separate read (`GET /cost-summary`). Carries only token counts + USD — never raw rows.
 
-**Purpose:** Per-session and running-total token/cost figures aggregated from `CostRecord`. The underlying `CostRecord` table is written from Phase 1; this endpoint is added in Phase 3.
+### `GET /cost-summary` *(Phase 3c)*
+
+**Purpose:** Per-session and all-time running-total token/cost figures aggregated from `CostRecord`, backing the workspace cost badge. The underlying `CostRecord` table is written per LLM call from Phase 1; this **read** endpoint is added in Phase 3c.
+
+**Query params (optional):**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `session_id` | string | — | When provided, scopes the `session` block to that session's `CostRecord` rows (joined via `query_result_id → QueryResult.session_id`); omitted → `session` is `null` |
+
+**Response:**
+```json
+{
+  "data": {
+    "session": {"prompt_tokens": 6120, "completion_tokens": 540, "estimated_cost_usd": 0.000612, "call_count": 4},
+    "all_time": {"prompt_tokens": 41200, "completion_tokens": 3800, "estimated_cost_usd": 0.004250, "call_count": 27}
+  },
+  "error": null
+}
+```
+`session` is `null` when no `session_id` is passed. `all_time` sums every `CostRecord` in the DB. An empty DB returns zeroed totals (`{"prompt_tokens": 0, "completion_tokens": 0, "estimated_cost_usd": 0.0, "call_count": 0}`).
+
+**Raw-data boundary:** carries only token counts, model-derived cost figures, and call counts — never raw rows. **Error cases:** none — an empty/over-filtered result returns zeroed totals.
 
 ## Authentication
 

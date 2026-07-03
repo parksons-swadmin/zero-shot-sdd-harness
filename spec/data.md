@@ -158,12 +158,21 @@ Per-LLM-call token usage and estimated cost.
 - **Anomaly persistence:** `QueryResult.anomaly_flags_json` (`sa.JSON()`, nullable) already exists at head — 3b is its first *writer* (it was `None` through Phase 1/2/3a). The change from the placeholder `list[str]` to `list[{type, column, severity, message}]` is a JSON-payload/contract change only, not a DDL change. Flags are the merge of the `compose_answer` `---ANOMALIES---` block and a deterministic `DatasetProfile`-based check (both aggregate-only, never raw rows) — see `spec/roadmap.md` Phase 3b design decisions.
 - **Audit read API:** the `audit_log_entries` table already exists at head with every field the Audit History UI needs (`id`, `session_id` FK, `dataset_id` FK, `query_result_id` FK, `event_type`, `detail_json`, `created_at`). `GET /audit-log` (`spec/api.md`) is a pure read over these existing rows; `detail_json` was written since Phase 1 and holds only metadata (question, code, status, counts) — never raw rows.
 
+## Phase 3c note — no new migration; existing rows become readable
+
+**No new Alembic migration is required for Phase 3c** (verified against `src/db/models.py` and `alembic/versions/0002_phase1_schema.py`, head revision `0002`). The `cost_records` table already exists at head with every field the cost API + per-query cost need (`id`, `query_result_id` FK → `query_results.id`, `provider`, `model`, `prompt_tokens`, `completion_tokens`, `estimated_cost_usd` `sa.Numeric()`, `created_at`) and has been **written per LLM call since Phase 1** (`finalize` in `src/graph/nodes.py`). Phase 3c adds only **read** paths over these existing rows:
+- **Per-query cost:** `GET`/POST answer payloads gain a `query_result.cost` object summed from the `CostRecord` rows for that `query_result_id` (contract addition only — no DDL). See `spec/api.md`.
+- **Running totals:** `GET /cost-summary` aggregates `CostRecord` (all-time, and per-session via `query_result_id → QueryResult.session_id`). See `spec/api.md`.
+- **Streaming:** the answer-streaming endpoint persists **no** new state — it reads the same `QueryResult`/`CostRecord` that `finalize` already writes. See `spec/roadmap.md` Phase 3c.
+
+The gate runs `alembic current` only (must print `0002`); no `alembic revision --autogenerate` this phase.
+
 ## Data Lifecycle
 
 - **Dataset:** created `uploading` → `cleaning` → `ready` (or `error`); never auto-deleted or expired in v1 — the user's library is expected to persist indefinitely. Original files are never mutated after upload. **A derived/exported dataset (Phase 3a)** is created directly in `ready` status with `derived_from_query_result_id` set, and is otherwise indistinguishable from an upload for library listing and analysis.
 - **Session/Message/QueryResult:** created on first question, updated on every subsequent turn; no TTL — conversations may resume after days, per the brief.
 - **AuditLogEntry:** append-only, retained indefinitely in v1; log rotation/archival policy is explicitly deferred to Phase 4 hardening.
-- **CostRecord:** append-only, one row per LLM call; summed for the running-total cost display (Phase 3).
+- **CostRecord:** append-only, one row per LLM call, written since Phase 1; summed per-query (`query_result.cost`) and for the running-total cost display (`GET /cost-summary`) starting Phase 3c.
 - **SessionDataset (Phase 2):** a session's dataset scope is fixed at creation and never mutated — selecting a new/different set of files in the library always creates a new `Session` (+ its `SessionDataset` rows) over the union of selected `dataset_ids`, rather than appending to an existing session's scope. See `spec/roadmap.md` Phase 2 "Design decisions" for the rationale.
 
 ## Sensitive Data

@@ -69,6 +69,17 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 - Chronological table (`data-testid="audit-table"`, oldest-first): `timestamp`, `event_type`, session/dataset, and a summary of `detail` (question text for `ask`, a code snippet for `code_exec`, status for `answer`), each row linking back to its originating session.
 - **Raw-data boundary:** shows questions, generated code, and result metadata/summaries only — never raw spreadsheet rows (the `GET /audit-log` payload carries no row data; see `spec/api.md`).
 
+### Screen: Workspace live progress & cost (Phase 3c — activates the last two Phase-1 stubs)
+
+**Purpose:** Show the run happening live (streamed answer + step counter) and make cost visible, replacing the final two "coming soon" stubs.
+
+**Key elements (real, Phase 3c — replacing the Phase-1 cost badge and step-progress stubs):**
+- **Cost badge** (`CostBadge.tsx`, keeps `data-testid="cost-badge"`): replaces the static "Cost tracking — coming soon" badge. Fetches `GET /cost-summary` for the all-time running total on mount and refetches after each answer; shows the running total (USD + token count) and the latest answer's per-query `query_result.cost` inline. The running total visibly increases with each question.
+- **Step-progress indicator** (`StepProgress.tsx`, `data-testid="step-progress"`): replaces the static "Step tracking — coming soon" stub (the old `stub-step-progress` id is retired). During a streamed ask it renders the live "Step N of ~M: {label}" from incoming `step` events — an honest step-wise/indeterminate indicator, **never a fabricated percentage bar** (per `harness/patterns/ui-ux.md` "never fake progress").
+- **Streamed answer:** the Ask flow uses `POST /sessions/{id}/messages/stream` (SSE over `fetch()`+`ReadableStream`, via `frontend/src/lib/stream.ts`) by default: `answer_chunk` events render the answer progressively, then the authoritative `result` event reconciles the full `QueryResultOut` (charts/table/export/anomalies/follow-ups/cost) into the existing rendering. The non-streaming POST remains the fallback if the stream errors before any event.
+
+**No "coming soon" stubs remain on the workspace after 3c** — every Phase-1 placeholder is now live functionality.
+
 ## Error States
 
 - **Upload error** (bad format / too large): the dropzone shows a specific message ("This file is larger than 100MB — try a smaller export" / "Couldn't read this as a CSV") with a retry affordance — never a raw exception.

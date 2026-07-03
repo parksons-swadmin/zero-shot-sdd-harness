@@ -84,6 +84,14 @@ export interface AnomalyFlag {
   message: string
 }
 
+// Per-query token/cost total, summed from CostRecord rows. See spec/api.md
+// (Phase 3c). Null before Phase 3c populated it. Carries only token counts + USD.
+export interface QueryCost {
+  prompt_tokens: number
+  completion_tokens: number
+  estimated_cost_usd: number
+}
+
 export interface QueryResult {
   id: string
   reasoning_mode: string
@@ -96,6 +104,42 @@ export interface QueryResult {
   follow_up_questions: string[] | null
   anomaly_flags: AnomalyFlag[] | null
   step_count: number
+  status: string
+  cost: QueryCost | null
+}
+
+// Running token/cost totals from GET /cost-summary. See spec/api.md (Phase 3c).
+export interface CostTotals {
+  prompt_tokens: number
+  completion_tokens: number
+  estimated_cost_usd: number
+  call_count: number
+}
+
+export interface CostSummaryResponse {
+  session: CostTotals | null
+  all_time: CostTotals
+}
+
+// SSE event payloads for POST /sessions/{id}/messages/stream. See spec/api.md.
+export interface StepEvent {
+  index: number
+  node: string
+  label: string
+  total_estimate: number
+}
+
+export interface AnswerChunkEvent {
+  text: string
+}
+
+export interface StreamResultEvent {
+  message_id: string
+  query_result: QueryResult
+}
+
+export interface StreamErrorEvent {
+  message: string
   status: string
 }
 

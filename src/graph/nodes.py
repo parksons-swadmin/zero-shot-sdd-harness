@@ -767,6 +767,33 @@ def _build_chart_spec(execution_result: dict | None, chart_intent: dict | None) 
     }
 
 
+# Markers that terminate the answer prose in a compose_answer response. When
+# streaming, only the text BEFORE the earliest of these may be emitted as
+# answer_chunks, so the concatenation of chunks equals the final summary_text
+# (the stripped prose) and never leaks the trailing JSON blocks.
+_STREAM_MARKERS = (_FOLLOW_UPS_MARKER, _ARTIFACTS_MARKER, _ANOMALIES_MARKER)
+
+
+def _safe_stream_region(buffer: str) -> str:
+    """Return the portion of a partial compose_answer buffer that is safe to
+    emit as answer prose so far.
+
+    Cuts at the earliest complete section marker if one is present; otherwise
+    withholds a trailing suffix that could be the start of a not-yet-complete
+    marker (so a marker is never partially emitted across chunk boundaries).
+    """
+    indices = [i for i in (buffer.find(m) for m in _STREAM_MARKERS) if i != -1]
+    if indices:
+        return buffer[: min(indices)]
+    hold = 0
+    for marker in _STREAM_MARKERS:
+        for k in range(len(marker) - 1, 0, -1):
+            if buffer.endswith(marker[:k]):
+                hold = max(hold, k)
+                break
+    return buffer[: len(buffer) - hold] if hold else buffer
+
+
 def compose_answer(state: AgentState) -> AgentState:
     start = time.monotonic()
     model = ""
@@ -775,7 +802,32 @@ def compose_answer(state: AgentState) -> AgentState:
         prompt = _build_compose_answer_prompt(
             state.get("question", ""), state.get("accumulated_summaries") or [], state.get("conversation_history") or [],
         )
-        text, usage = LLMClient().call_model_with_usage(prompt, system=system)
+
+        # Streaming path (Phase 3c): only active when a run-scoped answer-chunk
+        # sink is set by the streaming runner. Otherwise this is byte-for-byte
+        # the original non-streaming call, so the POST path is unchanged.
+        try:
+            from graph.runner import get_answer_chunk_sink
+            chunk_sink = get_answer_chunk_sink()
+        except Exception:
+            chunk_sink = None
+
+        emitted = [0]  # length of prose already emitted as answer_chunks
+        if chunk_sink is not None:
+            buf = [""]
+
+            def _on_chunk(piece: str) -> None:
+                buf[0] += piece
+                target = _safe_stream_region(buf[0]).strip()
+                if len(target) > emitted[0]:
+                    delta = target[emitted[0]:]
+                    emitted[0] = len(target)
+                    if delta:
+                        chunk_sink(delta)
+
+            text, usage = LLMClient().call_model_streaming(prompt, system=system, on_chunk=_on_chunk)
+        else:
+            text, usage = LLMClient().call_model_with_usage(prompt, system=system)
         model = usage.get("model", "")
 
         cost_records = list(state.get("cost_records") or [])
@@ -785,6 +837,13 @@ def compose_answer(state: AgentState) -> AgentState:
         })
 
         answer_text, follow_up_questions, artifact_intent, llm_anomalies = _split_answer_sections(text)
+
+        # Streaming reconciliation: emit any prose tail not yet streamed so the
+        # concatenation of all answer_chunk.text equals summary_text exactly
+        # (the authoritative `result` event carries the same summary_text).
+        if chunk_sink is not None and len(answer_text) > emitted[0]:
+            chunk_sink(answer_text[emitted[0]:])
+
         # Key numbers are extracted from the answer prose ONLY, never the
         # follow-up questions (which may contain bolded text of their own).
         key_numbers = _extract_key_numbers(answer_text)

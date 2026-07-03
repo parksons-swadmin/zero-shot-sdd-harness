@@ -20,7 +20,9 @@ Persistently logs every question asked, every piece of code run, and every resul
 | `AuditLogEntry` rows | DB record | `data.md` → AuditLogEntry |
 | `CostRecord` rows | DB record | `data.md` → CostRecord |
 | Audit history listing (Phase 3b) | JSON | `GET /audit-log` |
-| Cost summary (Phase 3c) | JSON | `GET /cost-summary` |
+| Per-query cost (Phase 3c) | JSON | `query_result.cost` on the ask/history/stream payloads |
+| Cost summary — session + all-time totals (Phase 3c) | JSON | `GET /cost-summary` |
+| Streamed answer + live step progress (Phase 3c) | SSE stream | `POST /sessions/{id}/messages/stream` |
 | Structured stdout logs | JSON log line | stdout, per `spec/architecture.md` → Observability |
 
 ## External Calls
@@ -43,5 +45,7 @@ Persistently logs every question asked, every piece of code run, and every resul
 - [ ] After a run that includes N Gemini calls, exactly N `CostRecord` rows exist with non-zero `prompt_tokens`/`completion_tokens` when the provider returns usage metadata.
 - [ ] (Phase 3b) `GET /audit-log?session_id=...` returns the entries for a known session in chronological order, paginated (`limit`/`offset`/`total`) and filterable by `session_id`/`dataset_id`/`event_type`, with no raw row-level data in any `detail` payload.
 - [ ] (Phase 3b) The Audit History screen at `/app/history/` renders a prior run's `ask`/`code_exec`/`answer` entries in order (question text + code snippet + status visible), never raw rows.
-- [ ] (Phase 3c) `GET /cost-summary` returns a running total equal to the sum of all `CostRecord.estimated_cost_usd` for the current data, verified against an independently computed sum in the test.
+- [ ] (Phase 3c) `GET /cost-summary` returns an `all_time` total equal to the sum of all `CostRecord.estimated_cost_usd`, and a `session` total equal to that session's rows, each verified against an independently computed sum in the test; the running total strictly increases after another question.
+- [ ] (Phase 3c) The ask/history/stream payloads carry a per-query `query_result.cost` equal to the independently-summed `CostRecord` rows for that `query_result_id`; the cost badge shows a real figure (no "coming soon" stub remains).
+- [ ] (Phase 3c) `POST /sessions/{id}/messages/stream` emits ≥1 `step` event and ≥1 `answer_chunk`, ends with exactly one `result` event whose `summary_text` equals the concatenated `answer_chunk` text and contains the full-data-correct answer, and the non-streaming POST path still works unchanged — with no raw row value in any stream/cost payload.
 - [ ] A failed run (e.g. Gemini timeout) still produces an `AuditLogEntry` with `event_type="error"` and any `CostRecord`s for calls that completed before the failure.

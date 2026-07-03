@@ -50,10 +50,12 @@ test.describe('Phase 1 — upload, profile & ask', () => {
     const codeText = await codeBlock.textContent()
     expect(codeText?.trim().length ?? 0).toBeGreaterThan(0)
 
-    // Remaining labelled stubs are visible and clearly marked, never mistaken for bugs.
-    // (Library, Charts, Export and follow-ups are now real components — see Phase 2/3a.)
-    await expect(page.getByTestId('cost-badge')).toContainText('coming soon')
-    await expect(page.getByTestId('stub-step-progress')).toContainText('Coming soon')
+    // Phase 3c: the cost badge and step-progress indicator are now live (no longer
+    // "coming soon" stubs). The cost badge shows a real USD figure; the
+    // step-progress element exists (its live "Step N" text appears during a run).
+    await expect(page.getByTestId('cost-badge')).toContainText('$')
+    await expect(page.getByTestId('cost-badge')).not.toContainText('coming soon')
+    await expect(page.getByTestId('step-progress')).toBeVisible()
   })
 
   test('empty state before upload and disabled ask before a dataset exists', async ({ page }) => {

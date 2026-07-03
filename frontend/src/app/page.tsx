@@ -5,22 +5,26 @@ import Link from 'next/link'
 import ProfileTable from '@/components/ProfileTable'
 import AnomalyBanner from '@/components/AnomalyBanner'
 import CleaningReportList from '@/components/CleaningReportList'
-import StubPanel from '@/components/StubPanel'
 import LibrarySidebar from '@/components/LibrarySidebar'
 import FollowUpChips from '@/components/FollowUpChips'
 import ChatThread from '@/components/ChatThread'
 import ChartPanel from '@/components/ChartPanel'
 import ResultTable from '@/components/ResultTable'
 import ExportButton from '@/components/ExportButton'
+import CostBadge from '@/components/CostBadge'
+import StepProgress from '@/components/StepProgress'
+import { streamAsk } from '@/lib/stream'
 import type {
   ApiEnvelope,
   DatasetListItem,
   DatasetResponse,
   MessageOut,
   MessageResponse,
+  QueryCost,
   QueryResult,
   SessionHistoryResponse,
   SessionResponse,
+  StepEvent,
 } from '@/lib/types'
 
 type UploadState = 'idle' | 'uploading' | 'ready' | 'error'
@@ -69,6 +73,13 @@ export default function Home() {
   const [askState, setAskState] = useState<AskState>('idle')
   const [askError, setAskError] = useState<string | null>(null)
   const [answer, setAnswer] = useState<QueryResult | null>(null)
+
+  // Phase 3c — live streaming (step progress + progressive answer text) + cost.
+  const [streamStep, setStreamStep] = useState<StepEvent | null>(null)
+  const [streamingText, setStreamingText] = useState('')
+  const [latestCost, setLatestCost] = useState<QueryCost | null>(null)
+  // Bumped after each answer to make the cost badge refetch GET /cost-summary.
+  const [costRefreshKey, setCostRefreshKey] = useState(0)
 
   // Phase 2 — library / multi-file sessions & persisted history.
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0)
@@ -215,53 +226,129 @@ export default function Home() {
     if (file) uploadFile(file)
   }
 
-  async function handleAsk(e: React.FormEvent) {
-    e.preventDefault()
-    if (!question.trim() || !sessionId) return
-
-    setAskState('asking')
-    setAskError(null)
-    setAnswer(null)
-
-    try {
-      const res = await fetch(`/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
-      })
-      const body: ApiEnvelope<MessageResponse> = await res.json()
-
-      if (!res.ok || body.error) {
-        if (res.status === 409) {
-          setAskError('Still working on the previous question — try again in a moment.')
-        } else {
-          setAskError(body.error?.message ?? `Request failed (${res.status})`)
-        }
-        setAskState('error')
-        return
-      }
-
-      const result = body.data!.query_result
+  // Shared "an answer arrived" handler — used by both the streaming `result`
+  // event and the non-streaming fallback so display/refresh logic lives once.
+  const applyResult = useCallback(
+    async (sid: string, result: QueryResult) => {
       if (result.status === 'failed') {
         setAskError(result.summary_text || "Couldn't answer that — the analysis code failed to run. Try rephrasing.")
         setAskState('error')
         return
       }
-
       // The persisted thread is the single source of truth for displayed answers.
       // Refresh it so the new turn renders inside ChatThread, then keep only the
       // latest result in `answer` to drive the follow-up chips (no standalone panel).
-      await loadHistory(sessionId)
+      await loadHistory(sid)
       setAnswer(result)
+      setLatestCost(result.cost ?? null)
       setAskState('answered')
+      setCostRefreshKey(k => k + 1)
       // If this answer promoted a derived dataset, force the Library sidebar to
       // refetch GET /datasets so the new entry appears without a manual reload.
       if (result.export_dataset_id) {
         setLibraryRefreshKey(k => k + 1)
       }
+    },
+    [loadHistory],
+  )
+
+  // Non-streaming fallback: the original POST /sessions/{id}/messages path. Used
+  // if the stream errors before delivering any event (spec/ui.md Phase 3c).
+  const askNonStreaming = useCallback(
+    async (sid: string, q: string) => {
+      try {
+        const res = await fetch(`/sessions/${sid}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: q }),
+        })
+        const body: ApiEnvelope<MessageResponse> = await res.json()
+
+        if (!res.ok || body.error) {
+          if (res.status === 409) {
+            setAskError('Still working on the previous question — try again in a moment.')
+          } else {
+            setAskError(body.error?.message ?? `Request failed (${res.status})`)
+          }
+          setAskState('error')
+          return
+        }
+        await applyResult(sid, body.data!.query_result)
+      } catch {
+        setAskError('Network error — is the server running?')
+        setAskState('error')
+      }
+    },
+    [applyResult],
+  )
+
+  async function handleAsk(e: React.FormEvent) {
+    e.preventDefault()
+    if (!question.trim() || !sessionId) return
+
+    const sid = sessionId
+    const q = question
+
+    setAskState('asking')
+    setAskError(null)
+    setAnswer(null)
+    setStreamStep(null)
+    setStreamingText('')
+
+    let sawEvent = false
+    let finished = false
+
+    try {
+      const outcome = await streamAsk(sid, q, {
+        onStep: s => {
+          sawEvent = true
+          setStreamStep(s)
+        },
+        onChunk: c => {
+          sawEvent = true
+          setStreamingText(prev => prev + c.text)
+        },
+        onResult: async r => {
+          sawEvent = true
+          finished = true
+          await applyResult(sid, r.query_result)
+        },
+        onError: err => {
+          sawEvent = true
+          finished = true
+          setAskError(err.message || "Couldn't answer that — try rephrasing.")
+          setAskState('error')
+        },
+      })
+
+      // Pre-stream JSON error (404/409/422) — the stream never opened.
+      if (!outcome.ok) {
+        if (outcome.httpStatus === 409) {
+          setAskError('Still working on the previous question — try again in a moment.')
+          setAskState('error')
+          return
+        }
+        // 404/422/anything else: fall back to the non-streaming POST, which
+        // surfaces the same error envelope for consistent handling.
+        await askNonStreaming(sid, q)
+        return
+      }
+
+      // Stream opened but produced nothing usable → fall back.
+      if (!finished && !sawEvent) {
+        await askNonStreaming(sid, q)
+      }
     } catch {
-      setAskError('Network error — is the server running?')
-      setAskState('error')
+      // Network/stream failure mid-flight. If we never saw an event, the POST
+      // fallback can still answer; otherwise surface a clean stream error.
+      if (!sawEvent) {
+        await askNonStreaming(sid, q)
+      } else {
+        setAskError('The answer stream was interrupted — please try again.')
+        setAskState('error')
+      }
+    } finally {
+      setStreamingText('')
     }
   }
 
@@ -280,12 +367,7 @@ export default function Home() {
           >
             History
           </Link>
-          <span
-            className="rounded-full bg-gray-200 px-3 py-1 text-xs font-medium text-gray-500"
-            data-testid="cost-badge"
-          >
-            Cost tracking — coming soon
-          </span>
+          <CostBadge refreshKey={costRefreshKey} sessionId={sessionId} latestCost={latestCost} />
         </div>
       </header>
 
@@ -413,6 +495,18 @@ export default function Home() {
               </p>
             )}
 
+            {/* Progressive answer text streamed via SSE `answer_chunk` events. The
+                authoritative, markdown-rendered answer replaces this once the
+                terminal `result` event lands (via ChatThread above). */}
+            {askState === 'asking' && streamingText && (
+              <div
+                className="mt-3 whitespace-pre-wrap rounded-lg border border-blue-100 bg-blue-50/50 p-3 text-sm text-gray-800"
+                data-testid="streaming-answer"
+              >
+                {streamingText}
+              </div>
+            )}
+
             {askError && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" data-testid="ask-error">
                 {askError}
@@ -449,11 +543,8 @@ export default function Home() {
             exportDatasetId={answer?.export_dataset_id ?? null}
           />
 
-          <StubPanel title="Step tracking" caption="Step tracking — coming soon" testId="stub-step-progress">
-            <div className="mt-2 h-2 w-full rounded-full bg-gray-200">
-              <div className="h-2 w-1/4 rounded-full bg-gray-300" />
-            </div>
-          </StubPanel>
+          {/* Phase 3c — live step progress driven by the SSE `step` events. */}
+          <StepProgress step={streamStep} active={askState === 'asking'} />
         </aside>
       </div>
     </main>
