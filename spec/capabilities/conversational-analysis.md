@@ -21,7 +21,7 @@ Answers a natural-language question about one or more datasets by writing and lo
 | Generated pandas code | text | UI collapsible code panel |
 | Ranked/summary table, chart spec, export file | structured / file | UI table+chart+export (Phase 3) |
 | Follow-up question suggestions | text list | UI (Phase 2) |
-| Anomaly flags | text list | UI (Phase 3) |
+| Anomaly flags | `list[{type, column, severity, message}]` | UI anomaly banner (Phase 3b) |
 
 ## External Calls
 

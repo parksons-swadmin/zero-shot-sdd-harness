@@ -45,3 +45,20 @@ Rules for the `---ARTIFACTS---` JSON:
 - Titles/labels are optional plain strings.
 - If the answer is a single scalar with no table/chart, output `{"table": false, "chart": false}`.
 - This block must contain ONLY the JSON object — no prose, no bolding, no data rows.
+
+After the artifacts block, output a line containing exactly the marker:
+---ANOMALIES---
+Then output a single strict-JSON **array** of data-quality issues you noticed in the aggregate profile / structured results you were given. Each element has this shape:
+
+```
+[
+  {"type": "constant_column", "column": "data_source", "severity": "warning", "message": "data_source has the same value in every row."},
+  {"type": "null_values", "column": "region", "severity": "info", "message": "region has missing values."}
+]
+```
+
+Rules for the `---ANOMALIES---` JSON:
+- Emit `[]` when you notice no issues.
+- Each object has `"type"` (a short snake_case label), `"column"` (the exact column name, or `null` if the issue is not column-specific), `"severity"` (one of `"info"`, `"warning"`, `"critical"`), and `"message"` (a short plain-language description).
+- Report **only** issues you can infer from the provided aggregates and structured results — you never see raw rows, so **never put a row value here**. This block is intent/metadata only.
+- This block must contain ONLY the JSON array — no prose, no bolding, no data rows.

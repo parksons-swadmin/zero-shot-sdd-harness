@@ -1,7 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import ProfileTable from '@/components/ProfileTable'
+import AnomalyBanner from '@/components/AnomalyBanner'
 import CleaningReportList from '@/components/CleaningReportList'
 import StubPanel from '@/components/StubPanel'
 import LibrarySidebar from '@/components/LibrarySidebar'
@@ -270,12 +272,21 @@ export default function Home() {
           <h1 className="text-3xl font-bold tracking-tight">Data Analyst Agent</h1>
           <p className="mt-1 text-sm text-gray-500">Upload a CSV, get an instant profile, ask questions about it.</p>
         </div>
-        <span
-          className="rounded-full bg-gray-200 px-3 py-1 text-xs font-medium text-gray-500"
-          data-testid="cost-badge"
-        >
-          Cost tracking — coming soon
-        </span>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/history/"
+            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            data-testid="history-link"
+          >
+            History
+          </Link>
+          <span
+            className="rounded-full bg-gray-200 px-3 py-1 text-xs font-medium text-gray-500"
+            data-testid="cost-badge"
+          >
+            Cost tracking — coming soon
+          </span>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
@@ -409,9 +420,11 @@ export default function Home() {
             )}
 
             {/* The answer itself renders inside the ChatThread above (single source
-                of truth). Here we surface only the follow-up chips for the latest turn. */}
+                of truth). Here we surface the anomaly banner + follow-up chips for
+                the latest turn. */}
             {answer && askState === 'answered' && (
-              <div className="mt-4">
+              <div className="mt-4 space-y-4">
+                <AnomalyBanner flags={answer.anomaly_flags ?? null} />
                 <FollowUpChips questions={answer.follow_up_questions ?? []} onPick={setQuestion} />
               </div>
             )}

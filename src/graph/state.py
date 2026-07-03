@@ -35,7 +35,7 @@ class AgentState(TypedDict, total=False):
     export_path: str | None                  # Phase 3
     export_meta: dict | None                 # Phase 3a — {temp_path,row_count,column_count} from sandbox, promoted in finalize
     follow_up_questions: list[str]           # Phase 3
-    anomaly_flags: list[str]                 # Phase 3
+    anomaly_flags: list[dict]                # Phase 3b — [{type, column, severity, message}]
     cost_records: list[dict]                 # one per LLM call this run
 
     # Persistence handles set by finalize()

@@ -76,6 +76,14 @@ export interface TableData {
   truncated: boolean
 }
 
+// A single data-quality issue the agent surfaced while answering. See spec/api.md.
+export interface AnomalyFlag {
+  type: string
+  column: string | null
+  severity: 'info' | 'warning' | 'critical'
+  message: string
+}
+
 export interface QueryResult {
   id: string
   reasoning_mode: string
@@ -86,7 +94,7 @@ export interface QueryResult {
   export_dataset_id: string | null
   generated_code: string
   follow_up_questions: string[] | null
-  anomaly_flags: unknown[] | null
+  anomaly_flags: AnomalyFlag[] | null
   step_count: number
   status: string
 }
@@ -121,6 +129,32 @@ export interface SessionHistoryResponse {
   session_id: string
   dataset_ids: string[]
   messages: MessageOut[]
+}
+
+// A single audit-trail entry from GET /audit-log. See spec/api.md.
+export interface AuditLogEntry {
+  id: string
+  session_id: string | null
+  dataset_id: string | null
+  query_result_id: string | null
+  event_type: string
+  detail: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface AuditLogListResponse {
+  entries: AuditLogEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AuditLogParams {
+  session_id?: string
+  dataset_id?: string
+  event_type?: string
+  limit?: number
+  offset?: number
 }
 
 export interface ApiEnvelope<T> {

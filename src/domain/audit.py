@@ -11,3 +11,10 @@ class AuditLogEntryOut(BaseModel):
     event_type: str
     detail: dict
     created_at: datetime
+
+
+class AuditLogListResponse(BaseModel):
+    entries: list[AuditLogEntryOut]
+    total: int
+    limit: int
+    offset: int

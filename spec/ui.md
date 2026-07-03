@@ -49,13 +49,25 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 - **Export button** (`ExportButton.tsx`): enabled only when `query_result.export_dataset_id` is non-null; clicking it downloads `GET /query-results/{id}/export` (a full-data CSV, `Content-Disposition: attachment`). When the answer produced no export, the button stays disabled with a "No export for this answer" tooltip (never presented as broken).
 - **Derived dataset appears in Library:** after an answer whose `export_dataset_id` is non-null, the Phase-2 Library sidebar refreshes automatically (the workspace bumps a `libraryRefreshKey` used as the sidebar's React `key`, forcing a `GET /datasets` refetch) so the new derived dataset shows up as a selectable checkbox with no manual reload. The derived entry is queryable exactly like an uploaded file.
 
-**Still-stubbed on this screen after 3a (labelled "coming soon", not bugs):** the cost badge (3c), the step-progress indicator (3c), and anomaly banners (3b).
+**Still-stubbed on this screen after 3a (labelled "coming soon", not bugs):** the cost badge (3c) and the step-progress indicator (3c). *(Note: there is no anomaly "coming soon" stub in the Phase-1 UI — the anomaly banner is a net-new element added in 3b, not a stub swap; see `spec/roadmap.md` Phase 3b design decision #7.)*
 
-### Screen: Audit History (Phase 3b — new screen)
+### Screen: Workspace anomaly banner (Phase 3b — net-new element, no prior stub)
 
-**Purpose:** View the full audit trail — every question, code run, and result, timestamped.
+**Purpose:** Proactively surface the data-quality issues the agent noticed while answering.
 
-**Key elements:** filterable/paginated table (`session`, `dataset`, `event_type`, `timestamp`, detail), links back to the originating session.
+**Key elements (real, Phase 3b):**
+- **Anomaly banner** (`AnomalyBanner.tsx`, `data-testid="anomaly-banner"`): renders `query_result.anomaly_flags` (`list[{type, column, severity, message}]`) as a coloured banner on the answer — one row per flag showing the `column` and plain-language `message`, styled by `severity` (`critical`→red, `warning`→amber, `info`→slate). Renders nothing when `anomaly_flags` is null/empty (a clean answer has no banner — never a "no anomalies" placeholder). Zero extra LLM call — flags come from the existing `compose_answer` call merged with a deterministic profile check (see `spec/roadmap.md` Phase 3b).
+
+**Still-stubbed on the workspace after 3b (labelled "coming soon", not bugs):** the cost badge (3c) and the step-progress indicator (3c).
+
+### Screen: Audit History (Phase 3b — new screen at `/app/history/`)
+
+**Purpose:** View the full audit trail — every question, code run, and result, timestamped — reading the `AuditLogEntry` table written since Phase 1.
+
+**Key elements (real, Phase 3b):**
+- Filter controls: `session_id`, `dataset_id`, `event_type`; Prev/Next paging over `limit`/`offset`.
+- Chronological table (`data-testid="audit-table"`, oldest-first): `timestamp`, `event_type`, session/dataset, and a summary of `detail` (question text for `ask`, a code snippet for `code_exec`, status for `answer`), each row linking back to its originating session.
+- **Raw-data boundary:** shows questions, generated code, and result metadata/summaries only — never raw spreadsheet rows (the `GET /audit-log` payload carries no row data; see `spec/api.md`).
 
 ## Error States
 

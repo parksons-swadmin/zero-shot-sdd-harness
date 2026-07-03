@@ -38,8 +38,10 @@ _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 
 _FOLLOW_UPS_MARKER = "---FOLLOW-UPS---"
 _ARTIFACTS_MARKER = "---ARTIFACTS---"
+_ANOMALIES_MARKER = "---ANOMALIES---"
 _VALID_MODES = ("simple", "iterative", "planned")
 _VALID_CHART_TYPES = ("bar", "line", "pie")
+_VALID_SEVERITIES = ("info", "warning", "critical")
 
 
 def _parse_json_object(text: str) -> dict | list:
@@ -490,7 +492,7 @@ def _split_answer_and_follow_ups(text: str) -> tuple[str, list[str]]:
     return prose, follow_ups
 
 
-def _split_answer_sections(text: str) -> tuple[str, list[str], dict | None]:
+def _split_prose_follow_ups_artifacts(text: str) -> tuple[str, list[str], dict | None]:
     """Split a compose_answer response into (prose, follow_ups, artifact_intent).
 
     Generalises `_split_answer_and_follow_ups` to a THIRD trailing section:
@@ -524,6 +526,121 @@ def _split_answer_sections(text: str) -> tuple[str, list[str], dict | None]:
         except (ValueError, json.JSONDecodeError):
             artifact_intent = None
     return prose, follow_ups, artifact_intent
+
+
+def _coerce_anomaly(entry: object) -> dict | None:
+    """Coerce one LLM-emitted anomaly object to the canonical
+    `{type, column, severity, message}` shape, or None if malformed.
+
+    `type` and `message` are required non-empty strings; `column` is an
+    optional string (None allowed); `severity` is normalised to one of
+    info|warning|critical, defaulting to "info". Raw row values never live
+    here — this only reshapes the model's structural intent.
+    """
+    if not isinstance(entry, dict):
+        return None
+    a_type = entry.get("type")
+    message = entry.get("message")
+    if not isinstance(a_type, str) or not a_type.strip():
+        return None
+    if not isinstance(message, str) or not message.strip():
+        return None
+    column = entry.get("column")
+    if column is not None and not isinstance(column, str):
+        column = str(column)
+    severity = entry.get("severity")
+    if not isinstance(severity, str) or severity.lower() not in _VALID_SEVERITIES:
+        severity = "info"
+    else:
+        severity = severity.lower()
+    return {"type": a_type.strip(), "column": column, "severity": severity, "message": message.strip()}
+
+
+def _split_answer_sections(text: str) -> tuple[str, list[str], dict | None, list[dict]]:
+    """Split a compose_answer response into
+    (prose, follow_ups, artifact_intent, anomaly_flags).
+
+    Adds a FOURTH trailing section after `---ARTIFACTS---`: a `---ANOMALIES---`
+    block holding a strict-JSON *array* of `{type, column, severity, message}`
+    objects describing data-quality issues the model inferred from the
+    aggregate profile / structured results (never from raw rows). Because this
+    marker sits strictly after all prior markers, the prose boundary is
+    unchanged from Phase 3a and `_extract_key_numbers` still runs on prose only.
+
+    - If `---ANOMALIES---` is absent, anomaly_flags is [] and the head is split
+      exactly as in Phase 3a (backward compatible).
+    - If the anomaly JSON is unparseable, anomaly_flags is [] rather than
+      failing the run; malformed individual entries are dropped.
+    """
+    anomalies_index = text.find(_ANOMALIES_MARKER)
+    if anomalies_index == -1:
+        prose, follow_ups, artifact_intent = _split_prose_follow_ups_artifacts(text)
+        return prose, follow_ups, artifact_intent, []
+
+    head = text[:anomalies_index]
+    tail = text[anomalies_index + len(_ANOMALIES_MARKER):].strip()
+    prose, follow_ups, artifact_intent = _split_prose_follow_ups_artifacts(head)
+
+    anomaly_flags: list[dict] = []
+    if tail:
+        try:
+            parsed = _parse_json_object(tail)
+        except (ValueError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, list):
+            for entry in parsed:
+                coerced = _coerce_anomaly(entry)
+                if coerced is not None:
+                    anomaly_flags.append(coerced)
+    return prose, follow_ups, artifact_intent, anomaly_flags
+
+
+def _profile_anomalies(profiles: list[dict] | None) -> list[dict]:
+    """Deterministically derive data-quality flags from DatasetProfile
+    aggregates already in state — NO LLM call, and NO raw rows.
+
+    Reads only the per-column aggregate fields (`distinct_count`, `null_count`)
+    loaded by `load_context`. Conservative v1 rules:
+      - distinct_count <= 1  -> constant_column (warning): degenerate/all-same
+        or all-null column.
+      - null_count > 0       -> null_values (info): the column has missing data.
+    Guarantees a non-flaky signal whenever a genuinely degenerate column is in
+    scope, so the anomaly output never depends on model behaviour alone.
+    """
+    flags: list[dict] = []
+    for profile in profiles or []:
+        for col in profile.get("columns") or []:
+            name = col.get("name")
+            if not name:
+                continue
+            distinct_count = col.get("distinct_count")
+            null_count = col.get("null_count")
+            if isinstance(distinct_count, int) and distinct_count <= 1:
+                flags.append({
+                    "type": "constant_column",
+                    "column": name,
+                    "severity": "warning",
+                    "message": f"{name} has the same value in every row.",
+                })
+            if isinstance(null_count, int) and null_count > 0:
+                flags.append({
+                    "type": "null_values",
+                    "column": name,
+                    "severity": "info",
+                    "message": f"{name} has missing values.",
+                })
+    return flags
+
+
+def _merge_anomalies(llm_flags: list[dict], profile_flags: list[dict]) -> list[dict]:
+    """Merge LLM-emitted and deterministic profile flags, deduped by
+    (type, column). Deterministic (profile) entries win on conflict."""
+    merged: dict[tuple, dict] = {}
+    for flag in llm_flags:
+        merged[(flag.get("type"), flag.get("column"))] = flag
+    for flag in profile_flags:  # deterministic entries overwrite on conflict
+        merged[(flag.get("type"), flag.get("column"))] = flag
+    return list(merged.values())
 
 
 def _result_records(execution_result: dict | None) -> tuple[list[dict], dict] | None:
@@ -667,10 +784,16 @@ def compose_answer(state: AgentState) -> AgentState:
             "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
         })
 
-        answer_text, follow_up_questions, artifact_intent = _split_answer_sections(text)
+        answer_text, follow_up_questions, artifact_intent, llm_anomalies = _split_answer_sections(text)
         # Key numbers are extracted from the answer prose ONLY, never the
         # follow-up questions (which may contain bolded text of their own).
         key_numbers = _extract_key_numbers(answer_text)
+
+        # Merge the LLM-emitted anomalies with a deterministic profile-based
+        # check (dedup by (type, column); deterministic entries win). The
+        # deterministic check reads only aggregate profile fields — no raw rows,
+        # no extra LLM call — so a genuinely degenerate column is always flagged.
+        anomaly_flags = _merge_anomalies(llm_anomalies, _profile_anomalies(state.get("profiles")))
 
         # Table/chart are assembled deterministically from the already-capped
         # ExecutionResult — the LLM contributes only chart *intent*, never data.
@@ -693,10 +816,10 @@ def compose_answer(state: AgentState) -> AgentState:
                       prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
         _log_node("compose_answer", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok",
                   follow_up_count=len(follow_up_questions), has_table=table_data is not None,
-                  has_chart=chart_spec is not None)
+                  has_chart=chart_spec is not None, anomaly_count=len(anomaly_flags))
         return {**state, "answer_text": answer_text, "key_numbers": key_numbers,
                 "follow_up_questions": follow_up_questions, "table_data": table_data,
-                "chart_spec": chart_spec, "cost_records": cost_records}
+                "chart_spec": chart_spec, "anomaly_flags": anomaly_flags, "cost_records": cost_records}
     except Exception as exc:
         duration_ms = int((time.monotonic() - start) * 1000)
         _log_llm_call("compose_answer", model=model, prompt_chars=0, duration_ms=duration_ms, status="error", error=str(exc))
@@ -849,7 +972,7 @@ def finalize(state: AgentState) -> AgentState:
             export_dataset_id=None,
             generated_code=generated_code,
             follow_up_questions_json=(follow_up_questions or None),
-            anomaly_flags_json=None,
+            anomaly_flags_json=(state.get("anomaly_flags") or None),
             step_count=step_count,
             status=status,
         )

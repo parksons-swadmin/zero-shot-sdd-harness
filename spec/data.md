@@ -97,7 +97,7 @@ The structured artifact produced by an assistant `Message`.
 | export_dataset_id | UUID (text) | no | FK → Dataset, set if an export was produced (Phase 3) |
 | generated_code | text | yes | The exact pandas code that ran, shown in the collapsible panel |
 | follow_up_questions_json | JSON | no | Suggested next questions, 2-3 per answer (Phase 2) |
-| anomaly_flags_json | JSON | no | Data-quality flags noticed while answering (Phase 3) |
+| anomaly_flags_json | JSON | no | Data-quality flags noticed while answering — `list[{type, column, severity, message}]` (Phase 3b; `null` when none). See `spec/api.md`. |
 | step_count | integer | yes | How many graph nodes/iterations this run took |
 | status | text | yes | `completed` \| `failed` \| `partial` |
 | created_at | timestamp | yes | |
@@ -151,6 +151,12 @@ Per-LLM-call token usage and estimated cost.
 2. A new `Dataset` row is created with `original_path` → `export.csv`, `cleaned_path` → `export.parquet`, `row_count`/`column_count` from the derived frame, `status="ready"`, and `derived_from_query_result_id` = the producing `QueryResult.id`.
 3. A `DatasetProfile` is written via `tools/profiling.build_profile` (same aggregate-only profiler used for uploads — so the derived dataset is immediately queryable), plus a trivial `CleaningReport` with `issues_json={"issues": []}` (derived data is already clean) so the dataset is a complete library citizen for `GET /datasets/{id}`.
 4. The producing `QueryResult.export_dataset_id` is set to the new `Dataset.id`, and an `AuditLogEntry(event_type="answer")` records `export_dataset_id` in its `detail_json` (aggregate metadata only — never rows).
+
+## Phase 3b note — no new migration; existing columns become live
+
+**No new Alembic migration is required for Phase 3b** (verified against `src/db/models.py` and `alembic/versions/0002_phase1_schema.py`, the head revision `0002`). Both 3b features write/read only already-existing schema:
+- **Anomaly persistence:** `QueryResult.anomaly_flags_json` (`sa.JSON()`, nullable) already exists at head — 3b is its first *writer* (it was `None` through Phase 1/2/3a). The change from the placeholder `list[str]` to `list[{type, column, severity, message}]` is a JSON-payload/contract change only, not a DDL change. Flags are the merge of the `compose_answer` `---ANOMALIES---` block and a deterministic `DatasetProfile`-based check (both aggregate-only, never raw rows) — see `spec/roadmap.md` Phase 3b design decisions.
+- **Audit read API:** the `audit_log_entries` table already exists at head with every field the Audit History UI needs (`id`, `session_id` FK, `dataset_id` FK, `query_result_id` FK, `event_type`, `detail_json`, `created_at`). `GET /audit-log` (`spec/api.md`) is a pure read over these existing rows; `detail_json` was written since Phase 1 and holds only metadata (question, code, status, counts) — never raw rows.
 
 ## Data Lifecycle
 

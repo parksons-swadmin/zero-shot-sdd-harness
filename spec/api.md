@@ -206,9 +206,58 @@ Only `assistant` messages carry a non-null `query_result` (mirrors the `Message`
 
 No new request fields are added to `POST /sessions/{session_id}/messages` in Phase 3a — chart/table/export are decided by the agent from the question, not requested by a client flag.
 
-### `GET /audit-log` *(Phase 3)*
+**`anomaly_flags` in the answer payload *(Phase 3b)*:** the `query_result.anomaly_flags` field (present since Phase 1's contract; `[]`/`null` through Phase 1/2/3a) is **populated for real starting Phase 3b**. Its shape changes from the Phase-1 placeholder `list[str]` to a **list of objects**:
+```json
+"anomaly_flags": [
+  {"type": "constant_column", "column": "data_source", "severity": "warning", "message": "data_source has the same value in every row."},
+  {"type": "null_values", "column": "region", "severity": "info", "message": "region has missing values."}
+]
+```
+- `type` — a short machine key (e.g. `constant_column`, `null_values`, `outlier`, `duplicate`, `inconsistent_category`).
+- `column` — the offending column name, or `null` for a table-wide issue.
+- `severity` — one of `"info" | "warning" | "critical"`.
+- `message` — a plain-language description for the banner.
 
-**Purpose:** List audit-trail entries (paginated, filterable by `session_id`/`dataset_id`) for the history UI. The underlying `AuditLogEntry` table is written from Phase 1; this endpoint is added in Phase 3.
+Flags are produced by the existing `compose_answer` Gemini call (an `---ANOMALIES---` JSON array, mirroring `---ARTIFACTS---`) merged with a deterministic profile-based check, deduped by `(type, column)` — **zero extra LLM round-trips** (see `spec/roadmap.md` Phase 3b design decisions). Flags are derived from the aggregate `DatasetProfile` and the capped structured results only — never raw rows. `null` when no issues are found.
+
+### `GET /audit-log` *(Phase 3b)*
+
+**Purpose:** List audit-trail entries for the Audit History UI (`frontend/src/app/history/page.tsx`). The underlying `AuditLogEntry` table is written from Phase 1; this **read** endpoint is added in Phase 3b.
+
+**Query params (all optional):**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `session_id` | string | — | Filter to one session's trail |
+| `dataset_id` | string | — | Filter to entries tied to one dataset |
+| `event_type` | string | — | Filter to one event type (`upload`\|`clean`\|`profile`\|`ask`\|`code_exec`\|`answer`\|`error`) |
+| `limit` | int | 50 | Page size, clamped to a max of 200 |
+| `offset` | int | 0 | Page offset |
+
+**Ordering:** `created_at` ascending, then `id` — **chronological**, so a run's `ask` → `code_exec` → `answer` entries read in the order they happened.
+
+**Response:**
+```json
+{
+  "data": {
+    "entries": [
+      {"id": "uuid-a", "session_id": "uuid-s", "dataset_id": null, "query_result_id": "uuid-qr",
+       "event_type": "ask", "detail": {"question": "What is the total revenue?"}, "created_at": "2026-07-02T10:00:00Z"},
+      {"id": "uuid-b", "session_id": "uuid-s", "dataset_id": null, "query_result_id": "uuid-qr",
+       "event_type": "code_exec", "detail": {"generated_code": "result = df['revenue'].sum()", "step_count": 1}, "created_at": "2026-07-02T10:00:02Z"},
+      {"id": "uuid-c", "session_id": "uuid-s", "dataset_id": null, "query_result_id": "uuid-qr",
+       "event_type": "answer", "detail": {"status": "completed", "export_dataset_id": null}, "created_at": "2026-07-02T10:00:03Z"}
+    ],
+    "total": 3,
+    "limit": 50,
+    "offset": 0
+  },
+  "error": null
+}
+```
+
+**Raw-data boundary:** each entry's `detail` is the stored `AuditLogEntry.detail_json` verbatim, which by construction (see `src/graph/nodes.py::finalize`/`handle_error` and the ingestion audit writes) holds only metadata — the question text, the generated code, `step_count`, `status`, `export_dataset_id`, sanitized error text — **never row-level values**. This endpoint performs no join to the underlying data files and never reads a CSV/parquet. Enforced by a raw-data spy assertion in the Phase-3b gate (`tests/integration/test_phase3b_audit_boundary.py`).
+
+**Error cases:** none — an empty/over-filtered result returns `{"entries": [], "total": 0, ...}`.
 
 ### `GET /cost-summary` *(Phase 3)*
 

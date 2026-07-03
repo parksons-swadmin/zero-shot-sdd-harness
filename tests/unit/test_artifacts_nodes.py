@@ -24,26 +24,29 @@ def test_split_sections_full():
         "---ARTIFACTS---\n"
         '{"table": true, "chart": {"type": "bar", "x": "region", "y": "revenue"}}'
     )
-    prose, follow_ups, intent = nodes._split_answer_sections(text)
+    prose, follow_ups, intent, anomalies = nodes._split_answer_sections(text)
     assert prose == "The total is **$100**."
     assert follow_ups == ["Break down by region?", "Trend over time?"]
     assert intent == {"table": True, "chart": {"type": "bar", "x": "region", "y": "revenue"}}
+    assert anomalies == []
 
 
 def test_split_sections_no_artifacts_marker_backward_compatible():
     text = "Answer **5**.\n---FOLLOW-UPS---\n- Next?"
-    prose, follow_ups, intent = nodes._split_answer_sections(text)
+    prose, follow_ups, intent, anomalies = nodes._split_answer_sections(text)
     assert prose == "Answer **5**."
     assert follow_ups == ["Next?"]
     assert intent is None
+    assert anomalies == []
 
 
 def test_split_sections_unparseable_artifacts_json_degrades():
     text = "Answer.\n---FOLLOW-UPS---\n- Q\n---ARTIFACTS---\nnot json at all"
-    prose, follow_ups, intent = nodes._split_answer_sections(text)
+    prose, follow_ups, intent, anomalies = nodes._split_answer_sections(text)
     assert prose == "Answer."
     assert follow_ups == ["Q"]
     assert intent is None
+    assert anomalies == []
 
 
 def test_split_answer_and_follow_ups_helper_preserved():

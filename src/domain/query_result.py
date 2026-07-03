@@ -10,6 +10,13 @@ class KeyNumberOut(BaseModel):
     value: str
 
 
+class AnomalyFlagOut(BaseModel):
+    type: str
+    column: str | None = None
+    severity: str
+    message: str
+
+
 class QueryResultOut(BaseModel):
     id: str
     reasoning_mode: str
@@ -20,7 +27,7 @@ class QueryResultOut(BaseModel):
     export_dataset_id: str | None = None
     generated_code: str
     follow_up_questions: list[str] | None = None
-    anomaly_flags: list[str] | None = None
+    anomaly_flags: list[AnomalyFlagOut] | None = None
     step_count: int
     status: str
 

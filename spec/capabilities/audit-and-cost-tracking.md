@@ -41,6 +41,7 @@ Persistently logs every question asked, every piece of code run, and every resul
 
 - [ ] After a successful upload + ask, querying the DB directly shows `AuditLogEntry` rows for `upload`, `clean`, `profile`, `ask`, `code_exec`, `answer` with correct `created_at` ordering, even before any audit UI exists (Phase 1).
 - [ ] After a run that includes N Gemini calls, exactly N `CostRecord` rows exist with non-zero `prompt_tokens`/`completion_tokens` when the provider returns usage metadata.
-- [ ] (Phase 3b) `GET /audit-log?session_id=...` returns the entries for a known session in chronological order.
+- [ ] (Phase 3b) `GET /audit-log?session_id=...` returns the entries for a known session in chronological order, paginated (`limit`/`offset`/`total`) and filterable by `session_id`/`dataset_id`/`event_type`, with no raw row-level data in any `detail` payload.
+- [ ] (Phase 3b) The Audit History screen at `/app/history/` renders a prior run's `ask`/`code_exec`/`answer` entries in order (question text + code snippet + status visible), never raw rows.
 - [ ] (Phase 3c) `GET /cost-summary` returns a running total equal to the sum of all `CostRecord.estimated_cost_usd` for the current data, verified against an independently computed sum in the test.
 - [ ] A failed run (e.g. Gemini timeout) still produces an `AuditLogEntry` with `event_type="error"` and any `CostRecord`s for calls that completed before the failure.
