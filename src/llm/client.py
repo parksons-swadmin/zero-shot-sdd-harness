@@ -33,3 +33,17 @@ class LLMClient:
 
     def call_model(self, prompt: str, *, system: str | None = None) -> str:
         return self._provider.call_model(prompt, system=system)
+
+    def call_model_with_usage(self, prompt: str, *, system: str | None = None) -> tuple[str, dict]:
+        """Like call_model, but also returns {"model", "prompt_tokens", "completion_tokens"}.
+
+        Used by graph nodes that need to write a CostRecord per LLM call
+        (see spec/agent.md -> Observability, spec/architecture.md -> Cost/Token
+        Estimation Approach). Falls back to zeroed usage for providers that do
+        not expose token counts (e.g. Anthropic in this skeleton).
+        """
+        if hasattr(self._provider, "call_model_with_usage"):
+            return self._provider.call_model_with_usage(prompt, system=system)
+        text = self._provider.call_model(prompt, system=system)
+        model = getattr(self._provider, "_model", "") or getattr(self._provider, "model", "")
+        return text, {"model": model, "prompt_tokens": 0, "completion_tokens": 0}
