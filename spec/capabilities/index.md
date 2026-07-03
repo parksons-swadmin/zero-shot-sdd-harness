@@ -1,23 +1,19 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
-
 ---
 
 ## What Is a Capability?
 
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
+A capability is a single, discrete action or behavior the agent performs.
 
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
-
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+| Capability | File | Phase(s) |
+|-----------|------|----------|
+| Dataset Ingestion | [dataset-ingestion.md](dataset-ingestion.md) | 1 (upload/clean/profile single file), 2 (library, derived datasets) |
+| Conversational Analysis | [conversational-analysis.md](conversational-analysis.md) | 1 (single-call), 2 (adaptive depth + cross-file), 3 (charts/exports/follow-ups/anomalies) |
+| Library & Sessions | [library-and-sessions.md](library-and-sessions.md) | 2 (full) |
+| Audit & Cost Tracking | [audit-and-cost-tracking.md](audit-and-cost-tracking.md) | 1 (backend writes only), 3 (UI) |
 
 ## How to Add a New Capability
 
@@ -34,5 +30,5 @@ Each capability file should answer:
 - **Inputs** (what data it receives)
 - **Outputs** (what it produces)
 - **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
+- **Business rules**
 - **Success criteria** (how we test it)
