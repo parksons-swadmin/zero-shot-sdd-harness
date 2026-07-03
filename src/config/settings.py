@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     result_row_cap: int = Field(default=200)
     result_cell_cap: int = Field(default=2000)
 
+    # Artifact assembly (Phase 3a) — max points in a chart series (chart series
+    # are always drawn from the already-capped ExecutionResult, then further
+    # capped to this bound). Env: AGENT_CHART_MAX_POINTS.
+    chart_max_points: int = Field(default=100)
+
     # Gemini cost-estimation price table (USD per 1K tokens; placeholders — verify
     # against current Gemini pricing before the Phase 3 cost UI ships)
     gemini_input_price_per_1k: float = Field(default=0.000075)

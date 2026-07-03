@@ -140,9 +140,21 @@ Per-LLM-call token usage and estimated cost.
 - `Message` 1—0/1 `QueryResult` (only assistant messages have one)
 - `QueryResult` 1—N `CostRecord`, 1—N `AuditLogEntry`, 0—1 `export_dataset_id` → `Dataset`
 
+## Phase 3a note — no new migration; existing columns become live
+
+**No new Alembic migration is required for Phase 3a.** Every column Phase 3a writes already exists in the head migration (see `src/db/models.py`), created for Phase 1 and unused until now:
+- `Dataset.derived_from_query_result_id` (nullable FK → `query_results.id`) — set when a `Dataset` is a promoted export.
+- `QueryResult.table_json`, `QueryResult.chart_spec_json`, `QueryResult.export_dataset_id` (nullable FK → `datasets.id`), `QueryResult.anomaly_flags_json` — 3a is the first writer of `table_json`/`chart_spec_json`/`export_dataset_id`; `anomaly_flags_json` stays unused until Phase 3b.
+
+**Derived-dataset creation (Phase 3a).** When an answer's analysis code assigns an `export_df`, `finalize` promotes it into an ordinary library entry, reusing the existing ingestion machinery (no parallel structure):
+1. `storage/exports.promote_export(query_result_id, temp_path)` writes `exports/<query_result_id>/export.csv` and `export.parquet` (see `spec/architecture.md` → File Storage Layout).
+2. A new `Dataset` row is created with `original_path` → `export.csv`, `cleaned_path` → `export.parquet`, `row_count`/`column_count` from the derived frame, `status="ready"`, and `derived_from_query_result_id` = the producing `QueryResult.id`.
+3. A `DatasetProfile` is written via `tools/profiling.build_profile` (same aggregate-only profiler used for uploads — so the derived dataset is immediately queryable), plus a trivial `CleaningReport` with `issues_json={"issues": []}` (derived data is already clean) so the dataset is a complete library citizen for `GET /datasets/{id}`.
+4. The producing `QueryResult.export_dataset_id` is set to the new `Dataset.id`, and an `AuditLogEntry(event_type="answer")` records `export_dataset_id` in its `detail_json` (aggregate metadata only — never rows).
+
 ## Data Lifecycle
 
-- **Dataset:** created `uploading` → `cleaning` → `ready` (or `error`); never auto-deleted or expired in v1 — the user's library is expected to persist indefinitely. Original files are never mutated after upload.
+- **Dataset:** created `uploading` → `cleaning` → `ready` (or `error`); never auto-deleted or expired in v1 — the user's library is expected to persist indefinitely. Original files are never mutated after upload. **A derived/exported dataset (Phase 3a)** is created directly in `ready` status with `derived_from_query_result_id` set, and is otherwise indistinguishable from an upload for library listing and analysis.
 - **Session/Message/QueryResult:** created on first question, updated on every subsequent turn; no TTL — conversations may resume after days, per the brief.
 - **AuditLogEntry:** append-only, retained indefinitely in v1; log rotation/archival policy is explicitly deferred to Phase 4 hardening.
 - **CostRecord:** append-only, one row per LLM call; summed for the running-total cost display (Phase 3).

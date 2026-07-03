@@ -7,6 +7,9 @@ import StubPanel from '@/components/StubPanel'
 import LibrarySidebar from '@/components/LibrarySidebar'
 import FollowUpChips from '@/components/FollowUpChips'
 import ChatThread from '@/components/ChatThread'
+import ChartPanel from '@/components/ChartPanel'
+import ResultTable from '@/components/ResultTable'
+import ExportButton from '@/components/ExportButton'
 import type {
   ApiEnvelope,
   DatasetListItem,
@@ -249,6 +252,11 @@ export default function Home() {
       await loadHistory(sessionId)
       setAnswer(result)
       setAskState('answered')
+      // If this answer promoted a derived dataset, force the Library sidebar to
+      // refetch GET /datasets so the new entry appears without a manual reload.
+      if (result.export_dataset_id) {
+        setLibraryRefreshKey(k => k + 1)
+      }
     } catch {
       setAskError('Network error — is the server running?')
       setAskState('error')
@@ -418,29 +426,15 @@ export default function Home() {
             starting={starting}
           />
 
-          <StubPanel title="Charts" caption="Charts — coming soon" testId="stub-charts">
-            <div className="mt-2 flex h-24 items-center justify-center rounded border border-gray-200 bg-gray-50 text-xs text-gray-400">
-              Chart preview unavailable
-            </div>
-          </StubPanel>
+          {/* Phase 3a — real answer artifacts (replacing the Phase-1 Charts/Export stubs). */}
+          <ChartPanel chartSpec={answer?.chart_spec ?? null} />
 
-          <div
-            className="rounded-lg border border-dashed border-gray-300 bg-gray-100 p-4 opacity-70"
-            data-testid="stub-export"
-          >
-            <div className="mb-1 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-500">Export</h3>
-            </div>
-            <button
-              type="button"
-              disabled
-              title="Export — coming soon"
-              className="w-full cursor-not-allowed rounded-lg bg-gray-300 px-4 py-2 text-sm font-medium text-gray-500"
-            >
-              Export
-            </button>
-            <p className="mt-1 text-xs text-gray-400">Export — coming soon</p>
-          </div>
+          <ResultTable table={answer?.table ?? null} />
+
+          <ExportButton
+            queryResultId={answer?.id ?? null}
+            exportDatasetId={answer?.export_dataset_id ?? null}
+          />
 
           <StubPanel title="Step tracking" caption="Step tracking — coming soon" testId="stub-step-progress">
             <div className="mt-2 h-2 w-full rounded-full bg-gray-200">

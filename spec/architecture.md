@@ -16,7 +16,8 @@ FastAPI app (:8001)
     │
     ├── api/datasets.py    ── upload, list, profile detail
     ├── api/sessions.py    ── ask (runs the graph), session/message history
-    ├── api/audit.py       ── audit log + cost summary (Phase 3)
+    ├── api/query_results.py ── export download (Phase 3a)
+    ├── api/audit.py       ── audit log (Phase 3b) + cost summary (Phase 3c)
     │
     ▼
 graph/runner.py → graph/agent.py (LangGraph StateGraph)
@@ -77,7 +78,8 @@ storage/files.py ──→ local filesystem (AGENT_DATA_DIR) — original + clea
 | `google-genai` | >=2.9.0 | Gemini client (existing skeleton dependency) |
 | `langgraph` | >=0.1 | Agent graph (existing skeleton dependency) |
 | `python-multipart` | >=0.0.9 | FastAPI file-upload parsing |
-| `pyarrow` | >=16.0 | Fast columnar storage for cleaned datasets (`.parquet`) |
+| `pyarrow` | >=16.0 | Fast columnar storage for cleaned/derived datasets (`.parquet`) |
+| `recharts` (frontend) | ^2 | Chart rendering from the aggregated `chart_spec.series` (Phase 3a) — added to `frontend/package.json` |
 
 **Avoid:** any library that grants the sandbox network access (`requests`, `httpx`, `urllib3`) must never be imported inside `src/execution/` — enforced by the AST guard below, not just convention. No ORM "repository pattern" (per `harness/patterns/project-layout.md` rule 2) — direct SQLAlchemy queries in API handlers and graph nodes.
 
@@ -112,20 +114,27 @@ ${AGENT_DATA_DIR}/                       (default ./data, gitignored)
 │       ├── original.csv                 (byte-for-byte as uploaded, never mutated)
 │       └── cleaned.parquet              (post-cleaning, loaded for profiling + analysis)
 └── exports/
+    ├── _tmp/
+    │   └── <uuid>.parquet               (Phase 3a — sandbox-written export_df, before promotion; deleted after promote)
     └── <query_result_id>/
-        └── export.csv                   (Phase 3 — derived/exported dataset, becomes a new Dataset row)
+        ├── export.csv                   (Phase 3a — derived/exported dataset, becomes a new Dataset row; the download served by GET /query-results/{id}/export)
+        └── export.parquet               (Phase 3a — cleaned copy loaded for analysis, mirrors uploads/<id>/cleaned.parquet)
 ```
 
 Upload handling: the file is streamed to `original.csv` in chunks (never fully buffered in memory); requests exceeding `AGENT_MAX_UPLOAD_BYTES` (default `100_000_000`) are rejected with HTTP 413 before the write completes. Cleaning/profiling then loads the **full** file into a pandas DataFrame — a 100MB CSV (a few million rows of typical CRM/ops data) fits comfortably in memory on a personal machine; no row-sampling is used at any stage (see Phase-1 gate in `spec/roadmap.md`, which specifically tests this with a 10,000+ row fixture).
 
-## Streaming Approach (Phase 3)
+## Artifacts Approach (Phase 3a)
 
-Phase 1 is synchronous request/response (fits the sub-30s single-call budget; no streaming needed). Phase 3 adds a Server-Sent-Events endpoint (`GET /sessions/{id}/messages/{message_id}/stream`) that emits: (a) a `step` event after every graph node completes (`step_count`, `step_label`) for the live progress indicator, and (b) token-level `answer_chunk` events by using Gemini's streaming `generate_content` call inside `compose_answer`. Phase 1's UI stub for this is a static, clearly-labelled "coming soon" progress bar — never a fake animation.
+Charts and tables are computed **locally in the sandbox and assembled by our own code from the already-capped `ExecutionResult`** — the LLM's existing `compose_answer` call only emits chart/table *intent* (chart type, x/y column mapping, titles) in a trailing `---ARTIFACTS---` JSON block, never data values, so no extra LLM round-trip is added. `_build_chart_spec` caps the chart series to `AGENT_CHART_MAX_POINTS` (default 100) drawn only from `execution_result["result"]["data_json"]` (itself capped to `RESULT_ROW_CAP`/`RESULT_CELL_CAP`), which structurally guarantees a chart spec sent to the client carries only aggregated/binned series, never raw rows. Exports are the one full-data artifact: generated code may assign an optional `export_df`, which trusted sandbox code writes to a temp parquet locally (returning only aggregate metadata to state); `finalize` promotes it into a derived `Dataset` and it is downloaded only on an explicit `GET /query-results/{id}/export` over localhost — never a network hop to the LLM. See `spec/roadmap.md` Phase 3a for the full design decisions.
+
+## Streaming Approach (Phase 3c)
+
+Phase 1 is synchronous request/response (fits the sub-30s single-call budget; no streaming needed). Phase 3c adds a Server-Sent-Events endpoint (`GET /sessions/{id}/messages/{message_id}/stream`) that emits: (a) a `step` event after every graph node completes (`step_count`, `step_label`) for the live progress indicator, and (b) token-level `answer_chunk` events by using Gemini's streaming `generate_content` call inside `compose_answer`. Phase 1's UI stub for this is a static, clearly-labelled "coming soon" progress bar — never a fake animation; it remains a stub through 3a/3b and goes live in 3c.
 
 ## Cost / Token Estimation Approach
 
-`src/llm/client.py`'s `LLMClient.call_model` reads `response.usage_metadata.prompt_token_count` / `.candidates_token_count` from every Gemini response and returns them alongside the text. Every graph node that calls the LLM writes one `CostRecord` row (`provider="gemini"`, `model`, `prompt_tokens`, `completion_tokens`, `estimated_cost_usd`) computed via a configurable price table (`AGENT_GEMINI_INPUT_PRICE_PER_1K`, `AGENT_GEMINI_OUTPUT_PRICE_PER_1K` env vars). This is wired and real starting Phase 1 (writes happen on every call) even though the UI that displays it is a Phase-1 stub and goes live in Phase 3.
-> **Assumed:** the per-1K-token price env-var defaults are placeholders set from public Gemini pricing at spec-writing time; they must be re-verified against current Gemini pricing before the Phase 3 cost UI is shown to the user, since prices change.
+`src/llm/client.py`'s `LLMClient.call_model` reads `response.usage_metadata.prompt_token_count` / `.candidates_token_count` from every Gemini response and returns them alongside the text. Every graph node that calls the LLM writes one `CostRecord` row (`provider="gemini"`, `model`, `prompt_tokens`, `completion_tokens`, `estimated_cost_usd`) computed via a configurable price table (`AGENT_GEMINI_INPUT_PRICE_PER_1K`, `AGENT_GEMINI_OUTPUT_PRICE_PER_1K` env vars). This is wired and real starting Phase 1 (writes happen on every call) even though the UI that displays it is a Phase-1 stub and goes live in Phase 3c.
+> **Assumed:** the per-1K-token price env-var defaults are placeholders set from public Gemini pricing at spec-writing time; they must be re-verified against current Gemini pricing before the Phase 3c cost UI is shown to the user, since prices change.
 
 ## Concurrency
 

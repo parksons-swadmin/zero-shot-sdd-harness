@@ -79,11 +79,12 @@ class AgentState(TypedDict, total=False):
     # Output
     answer_text: str
     key_numbers: list[dict]                  # [{label, value}]
-    table_data: dict | None                  # Phase 3
-    chart_spec: dict | None                  # Phase 3
-    export_path: str | None                  # Phase 3
+    table_data: dict | None                  # Phase 3a
+    chart_spec: dict | None                  # Phase 3a
+    export_path: str | None                  # Phase 3a (final promoted export path)
+    export_meta: dict | None                 # Phase 3a — {temp_path,row_count,column_count} from sandbox, promoted in finalize
     follow_up_questions: list[str]           # Phase 2 — set by compose_answer, no extra LLM call
-    anomaly_flags: list[str]                 # Phase 3
+    anomaly_flags: list[str]                 # Phase 3b
     cost_records: list[dict]                 # one per LLM call this run
 
     # Control
@@ -144,9 +145,9 @@ Constants (env-configurable): `AGENT_MAX_ITERATIONS=4`, `AGENT_MAX_PLAN_STEPS=5`
 
 ### `compose_answer`
 **Reads from state:** `accumulated_summaries`, `question`, `conversation_history`
-**Writes to state:** `answer_text`, `key_numbers`, `follow_up_questions` (Phase 2), `table_data` (Phase 3), `chart_spec` (Phase 3), `anomaly_flags` (Phase 3)
+**Writes to state:** `answer_text`, `key_numbers`, `follow_up_questions` (Phase 2), `table_data` (Phase 3a), `chart_spec` (Phase 3a), `anomaly_flags` (Phase 3b)
 **LLM call:** yes, `gemini-3.1-pro`
-**Behaviour:** Synthesizes the final plain-language answer from the accumulated structured summaries only — never from raw rows. **Phase 2:** the same single call also produces 2-3 follow-up questions at zero extra LLM-call cost. `src/prompts/compose_answer.md` instructs the model to end its response with a literal `---FOLLOW-UPS---` line followed by 2-3 `- `-prefixed questions. A new `_split_answer_and_follow_ups(text)` helper in `src/graph/nodes.py` splits the raw response on that marker *before* `_extract_key_numbers` runs its bolded-number regex against the prose portion only, so the two parsers never collide. If the marker is absent (model didn't follow the format), `follow_up_questions` is set to `[]` rather than failing the run.
+**Behaviour:** Synthesizes the final plain-language answer from the accumulated structured summaries only — never from raw rows. **Phase 2:** the same single call also produces 2-3 follow-up questions at zero extra LLM-call cost. `src/prompts/compose_answer.md` instructs the model to end its response with a literal `---FOLLOW-UPS---` line followed by 2-3 `- `-prefixed questions. A new `_split_answer_and_follow_ups(text)` helper in `src/graph/nodes.py` splits the raw response on that marker *before* `_extract_key_numbers` runs its bolded-number regex against the prose portion only, so the two parsers never collide. If the marker is absent (model didn't follow the format), `follow_up_questions` is set to `[]` rather than failing the run. **Phase 3a:** the same call additionally emits a trailing `---ARTIFACTS---` JSON block (chart/table *intent only* — type, x/y column mapping, titles — never data values), parsed by a generalised `_split_answer_sections(text) -> (prose, follow_ups, artifact_intent)`; `_build_table_data`/`_build_chart_spec` then assemble `table_data`/`chart_spec` deterministically from the capped `execution_result` alone (chart series capped to `AGENT_CHART_MAX_POINTS`) — still zero extra LLM calls. **Phase 3b:** a further `---ANOMALIES---` block populates `anomaly_flags`.
 
 ### `handle_error`
 **Reads from state:** `error`, `run_id`, `session_id`
@@ -157,7 +158,7 @@ Constants (env-configurable): `AGENT_MAX_ITERATIONS=4`, `AGENT_MAX_PLAN_STEPS=5`
 ### `finalize`
 **Reads from state:** everything produced above
 **Writes to state:** `status = "completed"` (or `"partial"` if a step/iteration cap was hit)
-**External calls:** persists `Message` (assistant), `QueryResult`, `CostRecord`(s), `AuditLogEntry` (`event_type="answer"`)
+**External calls:** persists `Message` (assistant), `QueryResult`, `CostRecord`(s), `AuditLogEntry` (`event_type="answer"`); **Phase 3a:** also persists `table_json`/`chart_spec_json`, and when `export_meta` is present promotes the temp export into a derived `Dataset` (+ `DatasetProfile` + empty `CleaningReport`) via `storage/exports.promote_export` and sets `QueryResult.export_dataset_id` (see `spec/data.md` → "Derived-dataset creation").
 **Behaviour:** Single place where a successful run's output is committed to the DB.
 
 ---

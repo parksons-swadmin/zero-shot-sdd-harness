@@ -27,6 +27,8 @@ import json
 import queue
 import threading
 import time
+import uuid
+from pathlib import Path
 
 import pandas as pd
 
@@ -54,7 +56,17 @@ def _run_in_namespace(code: str, dataframes: dict, out_queue: "queue.Queue") -> 
     try:
         with contextlib.redirect_stdout(stdout_buf):
             exec(code, namespace)  # noqa: S102 -- guarded by code_guard.guard_code before this runs
-        out_queue.put({"ok": True, "result": namespace.get("result"), "stdout": stdout_buf.getvalue()})
+        # The generated code may optionally assign a second reserved variable
+        # `export_df` (a full derived DataFrame). We surface the object here so
+        # TRUSTED sandbox code (run_analysis_code) can persist it — the
+        # generated code itself never touches the filesystem (open/os stay
+        # unbound in _SAFE_BUILTINS).
+        out_queue.put({
+            "ok": True,
+            "result": namespace.get("result"),
+            "export_df": namespace.get("export_df"),
+            "stdout": stdout_buf.getvalue(),
+        })
     except Exception as exc:
         out_queue.put({"ok": False, "error": str(exc), "stdout": stdout_buf.getvalue()})
 
@@ -153,4 +165,29 @@ def run_analysis_code(code: str, dataframes: dict[str, "pd.DataFrame"], timeout_
         return {"ok": False, "error": outcome["error"], "result": None, "stdout": stdout_text, "duration_ms": duration_ms}
 
     capped = _cap_result(outcome["result"], settings.result_row_cap, settings.result_cell_cap)
-    return {"ok": True, "error": None, "result": capped, "stdout": stdout_text, "duration_ms": duration_ms}
+    result = {"ok": True, "error": None, "result": capped, "stdout": stdout_text, "duration_ms": duration_ms}
+
+    export_meta = _persist_export_df(outcome.get("export_df"), settings)
+    if export_meta is not None:
+        # Only aggregate metadata (temp path + shape) ever crosses back — never
+        # the export's rows. The capped `result` channel above is unchanged.
+        result["export"] = export_meta
+    return result
+
+
+def _persist_export_df(export_df, settings) -> dict | None:
+    """If the generated code assigned a DataFrame to `export_df`, TRUSTED code
+    (never the generated snippet) writes it to a temp parquet under
+    AGENT_DATA_DIR/exports/_tmp and returns aggregate metadata only. Returns
+    None when there is no valid export DataFrame."""
+    if not isinstance(export_df, pd.DataFrame):
+        return None
+    tmp_dir = Path(settings.data_dir).resolve() / "exports" / "_tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = tmp_dir / f"{uuid.uuid4()}.parquet"
+    export_df.to_parquet(temp_path, index=False)
+    return {
+        "temp_path": str(temp_path),
+        "row_count": int(len(export_df)),
+        "column_count": int(export_df.shape[1]),
+    }

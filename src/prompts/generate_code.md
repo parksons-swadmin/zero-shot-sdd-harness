@@ -9,4 +9,5 @@ Rules:
 - Never fabricate or assume row values that are not derivable from the profile — write general-purpose pandas code that computes the answer from the real data at execution time.
 - Do not read/write files, open network connections, or use `eval`/`exec`/`compile`/`__import__`/`open`.
 - Do not access dunder attributes (e.g. `__class__`, `__globals__`).
+- Optionally, when the user asks for the DATA ITSELF — a cleaned, filtered, or ranked *list of rows* they could export or reuse as a dataset (e.g. "export the West-region rows", "give me the top 100 customers as a dataset") — ALSO assign that full derived DataFrame to a variable named exactly `export_df`, in addition to `result`. Assign `export_df` ONLY when the request is for the underlying rows, not when a single aggregate/number answers it. `export_df` may hold the full derived data (it is not capped); `result` should still hold a concise aggregate/summary or a preview. When the user only wants an aggregate answer, do NOT assign `export_df` at all. `result` is ALWAYS required regardless.
 - Return ONLY a single fenced Python code block (```python ... ```). No prose before or after it.

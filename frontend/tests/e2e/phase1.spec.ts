@@ -50,11 +50,8 @@ test.describe('Phase 1 — upload, profile & ask', () => {
     const codeText = await codeBlock.textContent()
     expect(codeText?.trim().length ?? 0).toBeGreaterThan(0)
 
-    // Labelled stubs are visible and clearly marked, never mistaken for bugs.
-    await expect(page.getByTestId('stub-library')).toContainText('Coming soon')
-    await expect(page.getByTestId('stub-charts')).toContainText('Coming soon')
-    await expect(page.getByTestId('stub-export')).toContainText('coming soon')
-    await expect(page.getByTestId('stub-follow-ups')).toContainText('Coming soon')
+    // Remaining labelled stubs are visible and clearly marked, never mistaken for bugs.
+    // (Library, Charts, Export and follow-ups are now real components — see Phase 2/3a.)
     await expect(page.getByTestId('cost-badge')).toContainText('coming soon')
     await expect(page.getByTestId('stub-step-progress')).toContainText('Coming soon')
   })

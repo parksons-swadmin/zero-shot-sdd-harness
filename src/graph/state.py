@@ -33,6 +33,7 @@ class AgentState(TypedDict, total=False):
     table_data: dict | None                  # Phase 3
     chart_spec: dict | None                  # Phase 3
     export_path: str | None                  # Phase 3
+    export_meta: dict | None                 # Phase 3a — {temp_path,row_count,column_count} from sandbox, promoted in finalize
     follow_up_questions: list[str]           # Phase 3
     anomaly_flags: list[str]                 # Phase 3
     cost_records: list[dict]                 # one per LLM call this run

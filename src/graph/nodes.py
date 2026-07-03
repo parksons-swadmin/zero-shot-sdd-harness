@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from db.models import AuditLogEntry, CostRecord, Dataset, DatasetProfile, Message, QueryResult
+from db.models import (
+    AuditLogEntry, CleaningReport, CostRecord, Dataset, DatasetProfile, Message, QueryResult,
+)
 from db.session import create_db_session
 from config.settings import get_settings
 from graph.state import AgentState
@@ -35,7 +37,9 @@ _CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 
 _FOLLOW_UPS_MARKER = "---FOLLOW-UPS---"
+_ARTIFACTS_MARKER = "---ARTIFACTS---"
 _VALID_MODES = ("simple", "iterative", "planned")
+_VALID_CHART_TYPES = ("bar", "line", "pie")
 
 
 def _parse_json_object(text: str) -> dict | list:
@@ -330,10 +334,21 @@ def execute_code(state: AgentState) -> AgentState:
                       step_count=step_count, error=result.get("error"))
             return {**state, "error": result.get("error"), "step_count": step_count, "execution_result": result}
 
+        # An `export` block (full-derived-DataFrame metadata written by the
+        # sandbox) is pulled out of the result and captured in state for
+        # finalize's promotion step. It is STRIPPED before the result is
+        # appended to accumulated_summaries so the export temp path / metadata
+        # can never reach a later LLM prompt (generate_code / check_result /
+        # compose_answer all read accumulated_summaries).
+        export_meta = result.pop("export", None) if isinstance(result, dict) else None
+
         accumulated = list(state.get("accumulated_summaries") or [])
         accumulated.append(result)
         _log_node("execute_code", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok", step_count=step_count)
-        return {**state, "execution_result": result, "accumulated_summaries": accumulated, "step_count": step_count}
+        new_state = {**state, "execution_result": result, "accumulated_summaries": accumulated, "step_count": step_count}
+        if export_meta is not None:
+            new_state["export_meta"] = export_meta
+        return new_state
     except Exception as exc:
         duration_ms = int((time.monotonic() - start) * 1000)
         _log_node("execute_code", run_id=state.get("run_id"), duration_ms=duration_ms, status="error",
@@ -475,6 +490,166 @@ def _split_answer_and_follow_ups(text: str) -> tuple[str, list[str]]:
     return prose, follow_ups
 
 
+def _split_answer_sections(text: str) -> tuple[str, list[str], dict | None]:
+    """Split a compose_answer response into (prose, follow_ups, artifact_intent).
+
+    Generalises `_split_answer_and_follow_ups` to a THIRD trailing section:
+    the model emits the answer prose, then a `---FOLLOW-UPS---` block, then a
+    `---ARTIFACTS---` block containing a single strict-JSON object describing
+    chart/table *intent only* (never data values). Sections appear in that
+    fixed order. The prose/follow-ups split is delegated to the existing helper
+    (its behaviour and callers are preserved) so key-number extraction still
+    runs against the prose alone.
+
+    - If `---ARTIFACTS---` is absent, artifact_intent is None (prose/follow-ups
+      unchanged — backward compatible with the Phase-2 format).
+    - If the artifact JSON is unparseable, artifact_intent is None rather than
+      failing the run.
+    """
+    artifacts_index = text.find(_ARTIFACTS_MARKER)
+    if artifacts_index == -1:
+        prose, follow_ups = _split_answer_and_follow_ups(text)
+        return prose, follow_ups, None
+
+    head = text[:artifacts_index]
+    tail = text[artifacts_index + len(_ARTIFACTS_MARKER):].strip()
+    prose, follow_ups = _split_answer_and_follow_ups(head)
+
+    artifact_intent: dict | None = None
+    if tail:
+        try:
+            parsed = _parse_json_object(tail)
+            if isinstance(parsed, dict):
+                artifact_intent = parsed
+        except (ValueError, json.JSONDecodeError):
+            artifact_intent = None
+    return prose, follow_ups, artifact_intent
+
+
+def _result_records(execution_result: dict | None) -> tuple[list[dict], dict] | None:
+    """Return (records, meta) parsed from the capped ExecutionResult's
+    `result.data_json`, or None when the result is a scalar / non-tabular /
+    unparseable. `records` is always a list of {column: value} dicts, built
+    ONLY from the already-capped `data_json` (never a live DataFrame).
+
+    A Series is normalised to two columns ("key"/"value") so tables and charts
+    have a uniform shape. `meta` carries total_rows/rows_returned/truncated.
+    """
+    if not isinstance(execution_result, dict):
+        return None
+    result = execution_result.get("result")
+    if not isinstance(result, dict):
+        return None
+    rtype = result.get("type")
+    if rtype not in ("dataframe", "series"):
+        return None
+
+    data_json = result.get("data_json")
+    if not isinstance(data_json, str) or not data_json:
+        return None
+    try:
+        parsed = json.loads(data_json)
+    except json.JSONDecodeError:
+        # data_json may have been hard-truncated by the cell cap into invalid
+        # JSON — degrade to no artifact rather than raising.
+        return None
+
+    meta = {
+        "total_rows": result.get("total_rows"),
+        "rows_returned": result.get("rows_returned"),
+        "truncated": bool(result.get("truncated")),
+    }
+
+    if rtype == "series":
+        if not isinstance(parsed, dict):
+            return None
+        records = [{"key": k, "value": v} for k, v in parsed.items()]
+        return records, meta
+
+    # dataframe
+    if not isinstance(parsed, list):
+        return None
+    records = [r for r in parsed if isinstance(r, dict)]
+    return records, meta
+
+
+def _build_table_data(execution_result: dict | None) -> dict | None:
+    """Assemble a table (columns + rows) deterministically from the capped
+    ExecutionResult ONLY. Returns None for a scalar / non-tabular result.
+
+    Never reads a live DataFrame — rows come solely from `result.data_json`,
+    already capped by the sandbox to RESULT_ROW_CAP/RESULT_CELL_CAP.
+    """
+    parsed = _result_records(execution_result)
+    if parsed is None:
+        return None
+    records, meta = parsed
+    if not records:
+        return None
+
+    columns: list[str] = []
+    for record in records:
+        for key in record.keys():
+            if key not in columns:
+                columns.append(key)
+
+    rows = [[record.get(col) for col in columns] for record in records]
+    return {
+        "columns": columns,
+        "rows": rows,
+        "truncated": meta["truncated"],
+        "total_rows": meta["total_rows"],
+        "rows_returned": meta["rows_returned"],
+    }
+
+
+def _build_chart_spec(execution_result: dict | None, chart_intent: dict | None) -> dict | None:
+    """Assemble a chart spec deterministically from the capped ExecutionResult
+    ONLY, honouring the LLM's chart *intent* (type + x/y column mapping +
+    titles) but never its data. Series is further capped to
+    `settings.chart_max_points`. Returns None for a scalar / non-tabular result
+    or when the intent explicitly disables the chart.
+    """
+    if not isinstance(chart_intent, dict):
+        return None
+    if chart_intent.get("chart") is False:
+        return None
+
+    parsed = _result_records(execution_result)
+    if parsed is None:
+        return None
+    records, _meta = parsed
+    if not records:
+        return None
+
+    available = list(records[0].keys())
+    x_col = chart_intent.get("x") if chart_intent.get("x") in available else None
+    y_col = chart_intent.get("y") if chart_intent.get("y") in available else None
+    if x_col is None:
+        x_col = available[0]
+    if y_col is None:
+        # Prefer the first column that is not the x column.
+        y_candidates = [c for c in available if c != x_col]
+        y_col = y_candidates[0] if y_candidates else x_col
+
+    chart_type = chart_intent.get("type")
+    if chart_type not in _VALID_CHART_TYPES:
+        chart_type = "bar"
+
+    max_points = get_settings().chart_max_points
+    series = [{"x": r.get(x_col), "y": r.get(y_col)} for r in records[:max_points]]
+
+    return {
+        "type": chart_type,
+        "x_key": x_col,
+        "y_key": y_col,
+        "x_label": chart_intent.get("x_label") or x_col,
+        "y_label": chart_intent.get("y_label") or y_col,
+        "title": chart_intent.get("title"),
+        "series": series,
+    }
+
+
 def compose_answer(state: AgentState) -> AgentState:
     start = time.monotonic()
     model = ""
@@ -492,18 +667,36 @@ def compose_answer(state: AgentState) -> AgentState:
             "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
         })
 
-        answer_text, follow_up_questions = _split_answer_and_follow_ups(text)
+        answer_text, follow_up_questions, artifact_intent = _split_answer_sections(text)
         # Key numbers are extracted from the answer prose ONLY, never the
         # follow-up questions (which may contain bolded text of their own).
         key_numbers = _extract_key_numbers(answer_text)
+
+        # Table/chart are assembled deterministically from the already-capped
+        # ExecutionResult — the LLM contributes only chart *intent*, never data.
+        execution_result = state.get("execution_result")
+        table_data = _build_table_data(execution_result)
+        chart_intent: dict | None = None
+        if isinstance(artifact_intent, dict):
+            if artifact_intent.get("table") is False:
+                table_data = None
+            raw_chart = artifact_intent.get("chart")
+            if isinstance(raw_chart, dict):
+                chart_intent = raw_chart
+            elif "type" in artifact_intent or "x" in artifact_intent:
+                # Tolerate a flat intent object (type/x/y at top level).
+                chart_intent = artifact_intent
+        chart_spec = _build_chart_spec(execution_result, chart_intent)
 
         duration_ms = int((time.monotonic() - start) * 1000)
         _log_llm_call("compose_answer", model=model, prompt_chars=len(prompt), duration_ms=duration_ms, status="ok",
                       prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
         _log_node("compose_answer", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok",
-                  follow_up_count=len(follow_up_questions))
+                  follow_up_count=len(follow_up_questions), has_table=table_data is not None,
+                  has_chart=chart_spec is not None)
         return {**state, "answer_text": answer_text, "key_numbers": key_numbers,
-                "follow_up_questions": follow_up_questions, "cost_records": cost_records}
+                "follow_up_questions": follow_up_questions, "table_data": table_data,
+                "chart_spec": chart_spec, "cost_records": cost_records}
     except Exception as exc:
         duration_ms = int((time.monotonic() - start) * 1000)
         _log_llm_call("compose_answer", model=model, prompt_chars=0, duration_ms=duration_ms, status="error", error=str(exc))
@@ -572,6 +765,54 @@ def _estimate_cost(cost_record: dict) -> float:
     return round(cost, 6)
 
 
+def _promote_derived_dataset(session, query_result_id: str, export_meta: dict | None) -> str | None:
+    """Promote a sandbox export (temp parquet) into a derived Dataset library
+    entry, reusing the existing ingestion machinery (Dataset + DatasetProfile +
+    empty CleaningReport). Returns the new Dataset id, or None when there is no
+    export. The full derived rows live only on local disk (export.csv/parquet);
+    only aggregate profile fields + shape counts are computed here.
+    """
+    if not isinstance(export_meta, dict):
+        return None
+    temp_path = export_meta.get("temp_path")
+    if not temp_path:
+        return None
+
+    from storage import exports  # local import: avoids import cost on the hot path
+    from tools.profiling import build_profile  # read-only aggregate profiler
+
+    promoted = exports.promote_export(query_result_id, temp_path)
+    csv_path = promoted["csv_path"]
+    parquet_path = promoted["parquet_path"]
+
+    df = pd.read_parquet(parquet_path)
+    columns = build_profile(df)
+
+    try:
+        size_bytes = Path(csv_path).stat().st_size
+    except OSError:
+        size_bytes = 0
+
+    derived = Dataset(
+        filename=f"derived_{query_result_id[:8]}.csv",
+        original_path=csv_path,
+        cleaned_path=parquet_path,
+        row_count=promoted["row_count"],
+        column_count=promoted["column_count"],
+        size_bytes=size_bytes,
+        status="ready",
+        derived_from_query_result_id=query_result_id,
+    )
+    session.add(derived)
+    session.flush()
+
+    session.add(DatasetProfile(dataset_id=derived.id, columns_json=columns))
+    session.add(CleaningReport(dataset_id=derived.id, issues_json={"issues": []}))
+    session.flush()
+
+    return derived.id
+
+
 def finalize(state: AgentState) -> AgentState:
     session_id = state["session_id"]
     question = state.get("question", "")
@@ -580,6 +821,9 @@ def finalize(state: AgentState) -> AgentState:
     generated_code = state.get("generated_code", "")
     key_numbers = state.get("key_numbers") or []
     follow_up_questions = state.get("follow_up_questions") or []
+    table_data = state.get("table_data")
+    chart_spec = state.get("chart_spec")
+    export_meta = state.get("export_meta")
     step_count = int(state.get("step_count") or 0)
     settings = get_settings()
 
@@ -600,8 +844,8 @@ def finalize(state: AgentState) -> AgentState:
             reasoning_mode=reasoning_mode,
             summary_text=answer_text,
             key_numbers_json=key_numbers,
-            table_json=None,
-            chart_spec_json=None,
+            table_json=table_data,
+            chart_spec_json=chart_spec,
             export_dataset_id=None,
             generated_code=generated_code,
             follow_up_questions_json=(follow_up_questions or None),
@@ -611,6 +855,14 @@ def finalize(state: AgentState) -> AgentState:
         )
         session.add(query_result)
         session.flush()
+
+        # Promote an export_df (if any) into a first-class derived Dataset that
+        # shows up in the library and is queryable like an upload. Only
+        # aggregate metadata reaches the DB/audit here — never the export rows.
+        export_dataset_id = _promote_derived_dataset(session, query_result.id, export_meta)
+        if export_dataset_id is not None:
+            query_result.export_dataset_id = export_dataset_id
+            session.flush()
 
         for cost_record in state.get("cost_records") or []:
             session.add(CostRecord(
@@ -627,7 +879,7 @@ def finalize(state: AgentState) -> AgentState:
         session.add(AuditLogEntry(session_id=session_id, query_result_id=query_result.id, event_type="code_exec",
                                    detail_json={"generated_code": generated_code, "step_count": step_count}))
         session.add(AuditLogEntry(session_id=session_id, query_result_id=query_result.id, event_type="answer",
-                                   detail_json={"status": status}))
+                                   detail_json={"status": status, "export_dataset_id": export_dataset_id}))
 
         message_id = assistant_message.id
         query_result_id = query_result.id

@@ -33,12 +33,12 @@ Accepts an uploaded CSV/spreadsheet, auto-cleans malformed data with a report of
 - Ambiguous cleaning decisions (e.g. an inconsistent date/phone/country-code format that could be fixed multiple valid ways) are not silently guessed: the default action taken is recorded with `needs_review: true` in the `CleaningReport` rather than blocking the upload.
   > **Assumed:** a blocking, conversational "which fix do you want?" flow is deferred (see `spec/agent.md` → Human-in-the-Loop Checkpoints); v1 flags for review non-blockingly.
 - Files over `AGENT_MAX_UPLOAD_BYTES` (default 100MB) are rejected before the write completes.
-- **Phase 2+:** exported/derived results (`Dataset.derived_from_query_result_id` set) become ordinary library entries, reusable in future questions like any uploaded file.
-- **Phase 2+:** the library (`GET /datasets`) lists every dataset — uploaded and derived — for cross-file selection.
+- **Phase 3a:** exported/derived results (`Dataset.derived_from_query_result_id` set) become ordinary library entries, created via the same profiling machinery (`build_profile` + a trivial empty `CleaningReport`), reusable in future questions like any uploaded file. See `spec/data.md` → "Derived-dataset creation".
+- **Phase 2+:** the library (`GET /datasets`) lists every dataset — uploaded and, from Phase 3a, derived — for cross-file selection.
 
 ## Success Criteria
 
 - [ ] Uploading a CSV with known dirty values (e.g. mixed date formats, one ambiguous phone format) returns a `CleaningReport` whose `issues` list names the affected column, the action taken, and marks the ambiguous case `needs_review: true`.
 - [ ] The returned `DatasetProfile.columns` row/column counts and per-column null/distinct counts exactly match values independently computed over the full source file (not a sample) for a 10,000+ row fixture.
 - [ ] A file over `AGENT_MAX_UPLOAD_BYTES` is rejected with HTTP 413 and no partial file is left in `AGENT_DATA_DIR`.
-- [ ] (Phase 2) `GET /datasets` lists both an originally-uploaded and a derived/exported dataset.
+- [ ] (Phase 3a) After an "export …" question, `GET /datasets` lists the resulting derived dataset alongside the originally-uploaded ones, and it can be selected into a session and queried like an upload.

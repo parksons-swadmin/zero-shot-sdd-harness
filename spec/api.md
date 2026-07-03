@@ -164,11 +164,47 @@ Only `assistant` messages carry a non-null `query_result` (mirrors the `Message`
 
 **Error cases:** `404` if `session_id` doesn't exist.
 
-### `GET /query-results/{query_result_id}/export` *(Phase 3)*
+### `GET /query-results/{query_result_id}/export` *(Phase 3a)*
 
-**Purpose:** Download the cleaned/derived export file for a `QueryResult` that produced one.
+**Purpose:** Download the full cleaned/derived export CSV for a `QueryResult` that produced one. This is the one path by which full derived row data leaves the process — an **explicit user download over localhost**, never a network hop to the LLM (see `spec/roadmap.md` Phase 3a design decision #3 and `spec/architecture.md` boundary section).
 
-**Error cases:** `404` if the result has no export.
+**Response:** `200` with `Content-Type: text/csv` and `Content-Disposition: attachment; filename="<original_stem>_derived.csv"`, streaming the derived `Dataset`'s `export.csv` (`FileResponse`). The file contains the **full** derived rows (not the 200-row capped result).
+
+**Error cases:**
+| Status | Condition |
+|--------|-----------|
+| 404 | `query_result_id` doesn't exist, or the result's `export_dataset_id` is null (no export was produced), or the export file is missing on disk |
+
+**Chart/table/export in the answer payload:** the `POST /sessions/{session_id}/messages` and `GET /sessions/{session_id}` responses already carry `query_result.table`, `query_result.chart_spec`, and `query_result.export_dataset_id` (fields present since Phase 1's contract; **populated for real starting Phase 3a**). Their shapes:
+
+- **`table`** (nullable object) — a ranked/summary table built locally from the capped `ExecutionResult` (never raw rows):
+  ```json
+  {
+    "title": "Total revenue by region (ranked)",
+    "columns": ["region", "revenue"],
+    "rows": [["West", 4201932.10], ["East", 3102111.50]],
+    "total_rows": 5,
+    "truncated": false
+  }
+  ```
+  `truncated` is `true` (and `rows` shorter than `total_rows`) when the underlying result exceeded `RESULT_ROW_CAP`.
+
+- **`chart_spec`** (nullable object) — a chart definition whose `series` carries **only aggregated/binned points** (≤ `AGENT_CHART_MAX_POINTS`, default 100) drawn from the same capped result, never raw rows:
+  ```json
+  {
+    "type": "bar",
+    "title": "Total revenue by region",
+    "x_label": "region",
+    "y_label": "revenue",
+    "series": [{"x": "West", "y": 4201932.10}, {"x": "East", "y": 3102111.50}],
+    "truncated": false
+  }
+  ```
+  `type` is one of `"bar" | "line" | "pie"`. `chart_spec` is `null` when the result is a scalar or the model's artifact intent requested no chart.
+
+- **`export_dataset_id`** (nullable UUID) — set when the run produced an `export_df`; points to the promoted derived `Dataset` (which also appears in `GET /datasets`). The download link is `GET /query-results/{id}/export`.
+
+No new request fields are added to `POST /sessions/{session_id}/messages` in Phase 3a — chart/table/export are decided by the agent from the question, not requested by a client flag.
 
 ### `GET /audit-log` *(Phase 3)*
 

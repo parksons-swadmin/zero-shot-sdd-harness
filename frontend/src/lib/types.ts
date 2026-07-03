@@ -51,13 +51,38 @@ export interface KeyNumber {
   value: string
 }
 
+// A single aggregated/binned point in a chart series (never a raw row).
+export interface ChartPoint {
+  x: string | number
+  y: number
+}
+
+// A chart definition built locally from the capped result. See spec/api.md.
+export interface ChartSpec {
+  type: 'bar' | 'line' | 'pie'
+  title: string
+  x_label: string
+  y_label: string
+  series: ChartPoint[]
+  truncated: boolean
+}
+
+// A ranked/summary table built locally from the capped result. See spec/api.md.
+export interface TableData {
+  title: string
+  columns: string[]
+  rows: Array<Array<string | number | null>>
+  total_rows: number
+  truncated: boolean
+}
+
 export interface QueryResult {
   id: string
   reasoning_mode: string
   summary_text: string
   key_numbers: KeyNumber[] | null
-  table: unknown
-  chart_spec: unknown
+  table: TableData | null
+  chart_spec: ChartSpec | null
   export_dataset_id: string | null
   generated_code: string
   follow_up_questions: string[] | null

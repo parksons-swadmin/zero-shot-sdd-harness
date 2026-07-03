@@ -38,7 +38,8 @@ Answers a natural-language question about one or more datasets by writing and lo
 - **Phase 1** exercises only the `simple` path; `classify_query` is hardcoded to `"simple"` (see `spec/agent.md`).
 - **Phase 2+:** a question referencing multiple datasets in scope ("this month vs last month") triggers a join/compare in the generated code; the agent infers which files in the session's dataset scope the question refers to.
 - **Phase 2:** the agent proactively suggests 2–3 follow-up questions on every completed answer, produced by the same `compose_answer` call at no extra LLM-call cost — never fabricated when there is nothing notable to suggest.
-- **Phase 3:** the agent additionally surfaces anomalies/data-quality issues it notices while answering, as part of the same `compose_answer` output.
+- **Phase 3a:** answers may carry a ranked/summary `table` and an interactive `chart_spec`, both built locally and deterministically from the capped `ExecutionResult` (never raw rows), with the chart/table *intent* (type, x/y column mapping, titles) coming from the same `compose_answer` call — zero extra LLM calls. The chart `series` is capped to `AGENT_CHART_MAX_POINTS`. When the analysis code assigns an optional full `export_df`, a downloadable derived dataset is produced (see `dataset-ingestion`).
+- **Phase 3b:** the agent additionally surfaces anomalies/data-quality issues it notices while answering, as part of the same `compose_answer` output (`anomaly_flags`).
 - Every LLM call's token usage is recorded as a `CostRecord`, from Phase 1 onward, regardless of whether the cost UI exists yet.
 
 ## Success Criteria
@@ -48,4 +49,6 @@ Answers a natural-language question about one or more datasets by writing and lo
 - [ ] No prompt sent to Gemini (asserted via a test double / log capture in an integration test) contains a raw row value from the uploaded fixture — only aggregate profile fields and structured execution results.
 - [ ] (Phase 2) A question requiring cross-file joins against two dataset fixtures returns the correct joined value and records `dataset_ids` with both files.
 - [ ] (Phase 2) A deliberately multi-part question forces `reasoning_mode == "planned"` with `step_count > 1`, and the run terminates within `AGENT_MAX_TOTAL_STEPS`.
-- [ ] (Phase 3) A question answerable with a ranked breakdown returns a non-null `table_json`; a chart-appropriate question returns a non-null `chart_spec_json`; at least one `follow_up_questions` suggestion is present on a normal completed answer.
+- [ ] (Phase 3a) A question answerable with a ranked breakdown returns a non-null `table_json` whose rows match independently pre-computed aggregates; a chart-appropriate question returns a non-null `chart_spec_json` whose `series` length ≤ `AGENT_CHART_MAX_POINTS` and is drawn only from the capped result (not raw rows); an "export …" question returns a non-null `export_dataset_id` whose downloaded file has the full derived row count while table/chart remain capped.
+- [ ] (Phase 3a) No prompt sent to Gemini during an artifact/export run contains a raw row value or the export file's rows (asserted via a prompt spy) — only aggregate profile fields and capped structured results.
+- [ ] (Phase 3b) A dataset with a deliberately anomalous column yields a non-empty `anomaly_flags` on a completed answer.

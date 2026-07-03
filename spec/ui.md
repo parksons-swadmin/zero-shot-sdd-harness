@@ -39,7 +39,19 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 
 **Key elements:** dataset list (filename, row count, uploaded date, status), multi-select for cross-file questions, persisted chat-thread view (message history survives reload/reopen across days).
 
-### Screen: Audit History (Phase 3 — new screen)
+### Screen: Workspace answer artifacts (Phase 3a — activates the Phase-1 Charts/Export stubs)
+
+**Purpose:** Render the table, chart, and export produced by an answer, and surface a derived dataset in the library.
+
+**Key elements (real, Phase 3a — replacing the Phase-1 "Charts" placeholder and disabled "Export" stub):**
+- **Ranked/summary table** (`ResultTable.tsx`): renders `query_result.table` (`columns`/`rows`) as a scrollable table with a "showing N of M rows" caption when `table.truncated` is true. Hidden when `table` is null.
+- **Chart panel** (`ChartPanel.tsx`): renders `query_result.chart_spec` via `recharts` — a bar/line/pie chart built from the `chart_spec.series` array (aggregated points only, never raw rows). When `chart_spec` is null, shows a small "No chart for this answer" caption rather than the old "coming soon" placeholder.
+- **Export button** (`ExportButton.tsx`): enabled only when `query_result.export_dataset_id` is non-null; clicking it downloads `GET /query-results/{id}/export` (a full-data CSV, `Content-Disposition: attachment`). When the answer produced no export, the button stays disabled with a "No export for this answer" tooltip (never presented as broken).
+- **Derived dataset appears in Library:** after an answer whose `export_dataset_id` is non-null, the Phase-2 Library sidebar refreshes automatically (the workspace bumps a `libraryRefreshKey` used as the sidebar's React `key`, forcing a `GET /datasets` refetch) so the new derived dataset shows up as a selectable checkbox with no manual reload. The derived entry is queryable exactly like an uploaded file.
+
+**Still-stubbed on this screen after 3a (labelled "coming soon", not bugs):** the cost badge (3c), the step-progress indicator (3c), and anomaly banners (3b).
+
+### Screen: Audit History (Phase 3b — new screen)
 
 **Purpose:** View the full audit trail — every question, code run, and result, timestamped.
 
@@ -50,7 +62,7 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 - **Upload error** (bad format / too large): the dropzone shows a specific message ("This file is larger than 100MB — try a smaller export" / "Couldn't read this as a CSV") with a retry affordance — never a raw exception.
 - **Ask error** (run failed / timed out / 409 already-in-flight): the answer panel shows a plain-language message ("Couldn't answer that — the analysis code failed to run. Try rephrasing." for a code failure; "Still working on the previous question — try again in a moment" for 409) with the question re-editable, never a stack trace.
 - **Empty states:** upload screen before any file ("Upload a CSV to get started…"); ask panel before any question ("Ask a question about your data once it's uploaded").
-- **Loading states:** upload progress bar (real, reflects actual bytes sent); "Thinking…" indicator while a question is in flight (Phase 1: simple spinner + text; Phase 3: replaced by the real streaming step-progress indicator).
+- **Loading states:** upload progress bar (real, reflects actual bytes sent); "Thinking…" indicator while a question is in flight (Phase 1: simple spinner + text; Phase 3c: replaced by the real streaming step-progress indicator).
 
 ## Tech Stack
 

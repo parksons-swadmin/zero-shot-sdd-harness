@@ -4,7 +4,7 @@
 
 Persistently logs every question asked, every piece of code run, and every result stored, with timestamps — and records the token usage/estimated cost of every LLM call — so the tool is auditable and its running cost is visible.
 
-> **Phase 1 scope note:** the underlying log/cost writes are real from Phase 1 (a production-readiness hard constraint, not deferred), but the history and cost **UI** are Phase-1 stubs and go live in Phase 3.
+> **Phase scope note:** the underlying log/cost writes are real from Phase 1 (a production-readiness hard constraint, not deferred). The **UIs** ship later: the audit-history UI + `GET /audit-log` go live in **Phase 3b**; the cost/token UI + `GET /cost-summary` + answer streaming go live in **Phase 3c**.
 
 ## Inputs
 
@@ -19,8 +19,8 @@ Persistently logs every question asked, every piece of code run, and every resul
 |--------|------|-------------|
 | `AuditLogEntry` rows | DB record | `data.md` → AuditLogEntry |
 | `CostRecord` rows | DB record | `data.md` → CostRecord |
-| Audit history listing (Phase 3) | JSON | `GET /audit-log` |
-| Cost summary (Phase 3) | JSON | `GET /cost-summary` |
+| Audit history listing (Phase 3b) | JSON | `GET /audit-log` |
+| Cost summary (Phase 3c) | JSON | `GET /cost-summary` |
 | Structured stdout logs | JSON log line | stdout, per `spec/architecture.md` → Observability |
 
 ## External Calls
@@ -41,6 +41,6 @@ Persistently logs every question asked, every piece of code run, and every resul
 
 - [ ] After a successful upload + ask, querying the DB directly shows `AuditLogEntry` rows for `upload`, `clean`, `profile`, `ask`, `code_exec`, `answer` with correct `created_at` ordering, even before any audit UI exists (Phase 1).
 - [ ] After a run that includes N Gemini calls, exactly N `CostRecord` rows exist with non-zero `prompt_tokens`/`completion_tokens` when the provider returns usage metadata.
-- [ ] (Phase 3) `GET /audit-log?session_id=...` returns the entries for a known session in chronological order.
-- [ ] (Phase 3) `GET /cost-summary` returns a running total equal to the sum of all `CostRecord.estimated_cost_usd` for the current data, verified against an independently computed sum in the test.
+- [ ] (Phase 3b) `GET /audit-log?session_id=...` returns the entries for a known session in chronological order.
+- [ ] (Phase 3c) `GET /cost-summary` returns a running total equal to the sum of all `CostRecord.estimated_cost_usd` for the current data, verified against an independently computed sum in the test.
 - [ ] A failed run (e.g. Gemini timeout) still produces an `AuditLogEntry` with `event_type="error"` and any `CostRecord`s for calls that completed before the failure.
