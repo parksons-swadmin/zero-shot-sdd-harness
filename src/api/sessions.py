@@ -3,9 +3,14 @@ from sqlalchemy.orm import Session
 
 from api._common import ok, api_error
 from db.session import get_session
-from db.models import Dataset, QueryResult, SessionDataset, SessionRow
+from db.models import Dataset, Message, QueryResult, SessionDataset, SessionRow
 from domain.query_result import AskRequest, AskResponse, KeyNumberOut, QueryResultOut
-from domain.session import CreateSessionRequest, CreateSessionResponse
+from domain.session import (
+    CreateSessionRequest,
+    CreateSessionResponse,
+    MessageOut,
+    SessionHistoryResponse,
+)
 from graph.runner import SessionBusyError, run_agent
 
 router = APIRouter()
@@ -27,6 +32,74 @@ def create_session(req: CreateSessionRequest, session: Session = Depends(get_ses
         session.add(SessionDataset(session_id=row.id, dataset_id=dataset_id))
 
     return ok(CreateSessionResponse(session_id=row.id, dataset_ids=req.dataset_ids).model_dump())
+
+
+def _query_result_out(query_result: QueryResult) -> QueryResultOut:
+    key_numbers = [KeyNumberOut(**kn) for kn in (query_result.key_numbers_json or [])]
+    return QueryResultOut(
+        id=query_result.id,
+        reasoning_mode=query_result.reasoning_mode,
+        summary_text=query_result.summary_text,
+        key_numbers=key_numbers,
+        table=query_result.table_json,
+        chart_spec=query_result.chart_spec_json,
+        export_dataset_id=query_result.export_dataset_id,
+        generated_code=query_result.generated_code,
+        follow_up_questions=query_result.follow_up_questions_json,
+        anomaly_flags=query_result.anomaly_flags_json,
+        step_count=query_result.step_count,
+        status=query_result.status,
+    )
+
+
+@router.get("/sessions/{session_id}")
+def get_session_history(session_id: str, session: Session = Depends(get_session)) -> dict:
+    row = session.get(SessionRow, session_id)
+    if row is None:
+        raise api_error("NOT_FOUND", f"Session {session_id} not found", 404)
+
+    dataset_ids = [
+        sd.dataset_id
+        for sd in session.query(SessionDataset)
+        .filter(SessionDataset.session_id == session_id)
+        .all()
+    ]
+
+    messages = (
+        session.query(Message)
+        .filter(Message.session_id == session_id)
+        .order_by(Message.created_at.asc())
+        .all()
+    )
+    results_by_message: dict[str, QueryResult] = {
+        qr.message_id: qr
+        for qr in session.query(QueryResult)
+        .filter(QueryResult.session_id == session_id)
+        .all()
+    }
+
+    message_outs = [
+        MessageOut(
+            id=m.id,
+            role=m.role,
+            content=m.content,
+            created_at=m.created_at,
+            query_result=(
+                _query_result_out(results_by_message[m.id])
+                if m.id in results_by_message
+                else None
+            ),
+        )
+        for m in messages
+    ]
+
+    return ok(
+        SessionHistoryResponse(
+            session_id=session_id,
+            dataset_ids=dataset_ids,
+            messages=message_outs,
+        ).model_dump()
+    )
 
 
 @router.post("/sessions/{session_id}/messages")

@@ -96,7 +96,7 @@ The structured artifact produced by an assistant `Message`.
 | chart_spec_json | JSON | no | Chart definition (Phase 3) |
 | export_dataset_id | UUID (text) | no | FK → Dataset, set if an export was produced (Phase 3) |
 | generated_code | text | yes | The exact pandas code that ran, shown in the collapsible panel |
-| follow_up_questions_json | JSON | no | Suggested next questions (Phase 3) |
+| follow_up_questions_json | JSON | no | Suggested next questions, 2-3 per answer (Phase 2) |
 | anomaly_flags_json | JSON | no | Data-quality flags noticed while answering (Phase 3) |
 | step_count | integer | yes | How many graph nodes/iterations this run took |
 | status | text | yes | `completed` \| `failed` \| `partial` |
@@ -146,6 +146,7 @@ Per-LLM-call token usage and estimated cost.
 - **Session/Message/QueryResult:** created on first question, updated on every subsequent turn; no TTL — conversations may resume after days, per the brief.
 - **AuditLogEntry:** append-only, retained indefinitely in v1; log rotation/archival policy is explicitly deferred to Phase 4 hardening.
 - **CostRecord:** append-only, one row per LLM call; summed for the running-total cost display (Phase 3).
+- **SessionDataset (Phase 2):** a session's dataset scope is fixed at creation and never mutated — selecting a new/different set of files in the library always creates a new `Session` (+ its `SessionDataset` rows) over the union of selected `dataset_ids`, rather than appending to an existing session's scope. See `spec/roadmap.md` Phase 2 "Design decisions" for the rationale.
 
 ## Sensitive Data
 

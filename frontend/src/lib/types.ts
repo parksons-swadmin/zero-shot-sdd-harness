@@ -71,6 +71,33 @@ export interface MessageResponse {
   query_result: QueryResult
 }
 
+export interface DatasetListItem {
+  dataset_id: string
+  filename: string
+  row_count: number
+  column_count: number
+  status: string
+  created_at: string
+}
+
+export interface DatasetListResponse {
+  datasets: DatasetListItem[]
+}
+
+export interface MessageOut {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+  query_result: QueryResult | null
+}
+
+export interface SessionHistoryResponse {
+  session_id: string
+  dataset_ids: string[]
+  messages: MessageOut[]
+}
+
 export interface ApiEnvelope<T> {
   data: T | null
   error: { code?: string; message: string } | null

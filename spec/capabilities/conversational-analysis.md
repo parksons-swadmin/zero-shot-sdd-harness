@@ -20,7 +20,8 @@ Answers a natural-language question about one or more datasets by writing and lo
 | Plain-language answer with inline key numbers | text (markdown) | UI answer panel |
 | Generated pandas code | text | UI collapsible code panel |
 | Ranked/summary table, chart spec, export file | structured / file | UI table+chart+export (Phase 3) |
-| Follow-up question suggestions, anomaly flags | text list | UI (Phase 3) |
+| Follow-up question suggestions | text list | UI (Phase 2) |
+| Anomaly flags | text list | UI (Phase 3) |
 
 ## External Calls
 
@@ -36,7 +37,8 @@ Answers a natural-language question about one or more datasets by writing and lo
 - Reasoning depth escalates only as needed: `simple` (one code-gen + execute pass) for straightforward lookups, `iterative` (generate → execute → check → refine, bounded) for questions needing a correction pass, `planned` (explicit multi-step plan, executed step by step) for genuinely multi-part questions. Bounded by `AGENT_MAX_ITERATIONS`, `AGENT_MAX_PLAN_STEPS`, `AGENT_MAX_TOTAL_STEPS` (see `spec/agent.md`) — never an unbounded loop.
 - **Phase 1** exercises only the `simple` path; `classify_query` is hardcoded to `"simple"` (see `spec/agent.md`).
 - **Phase 2+:** a question referencing multiple datasets in scope ("this month vs last month") triggers a join/compare in the generated code; the agent infers which files in the session's dataset scope the question refers to.
-- **Phase 3:** the agent proactively suggests 2–3 follow-up questions and surfaces anomalies/data-quality issues it notices while answering, as part of `compose_answer`'s output — never fabricated when there is nothing notable to flag.
+- **Phase 2:** the agent proactively suggests 2–3 follow-up questions on every completed answer, produced by the same `compose_answer` call at no extra LLM-call cost — never fabricated when there is nothing notable to suggest.
+- **Phase 3:** the agent additionally surfaces anomalies/data-quality issues it notices while answering, as part of the same `compose_answer` output.
 - Every LLM call's token usage is recorded as a `CostRecord`, from Phase 1 onward, regardless of whether the cost UI exists yet.
 
 ## Success Criteria

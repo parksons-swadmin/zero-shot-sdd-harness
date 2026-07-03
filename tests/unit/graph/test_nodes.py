@@ -41,9 +41,14 @@ def test_load_context_no_dataset_ids_sets_error(_isolated_db):
     assert result.get("error")
 
 
-def test_classify_query_hardcoded_simple(_isolated_db):
-    result = classify_query({"run_id": "r1"})
+def test_classify_query_routes_via_router_model(_isolated_db):
+    def fake_call(self, prompt, *, system=None, model=None):
+        return '{"mode": "simple"}', {"model": model or "gemini-2.5-flash", "prompt_tokens": 4, "completion_tokens": 1}
+
+    with patch("llm.client.LLMClient.call_model_with_usage", fake_call):
+        result = classify_query({"run_id": "r1", "question": "total?", "profiles": [], "cost_records": []})
     assert result["reasoning_mode"] == "simple"
+    assert len(result["cost_records"]) == 1
 
 
 def test_generate_code_prompt_excludes_raw_row_values(_isolated_db):

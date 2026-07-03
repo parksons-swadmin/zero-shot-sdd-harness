@@ -11,7 +11,7 @@ A capability is a single, discrete action or behavior the agent performs.
 | Capability | File | Phase(s) |
 |-----------|------|----------|
 | Dataset Ingestion | [dataset-ingestion.md](dataset-ingestion.md) | 1 (upload/clean/profile single file), 2 (library, derived datasets) |
-| Conversational Analysis | [conversational-analysis.md](conversational-analysis.md) | 1 (single-call), 2 (adaptive depth + cross-file), 3 (charts/exports/follow-ups/anomalies) |
+| Conversational Analysis | [conversational-analysis.md](conversational-analysis.md) | 1 (single-call), 2 (adaptive depth + cross-file + follow-ups), 3 (charts/exports/anomalies) |
 | Library & Sessions | [library-and-sessions.md](library-and-sessions.md) | 2 (full) |
 | Audit & Cost Tracking | [audit-and-cost-tracking.md](audit-and-cost-tracking.md) | 1 (backend writes only), 3 (UI) |
 

@@ -1,14 +1,53 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ProfileTable from '@/components/ProfileTable'
 import CleaningReportList from '@/components/CleaningReportList'
-import AnswerPanel from '@/components/AnswerPanel'
 import StubPanel from '@/components/StubPanel'
-import type { ApiEnvelope, DatasetResponse, MessageResponse, QueryResult, SessionResponse } from '@/lib/types'
+import LibrarySidebar from '@/components/LibrarySidebar'
+import FollowUpChips from '@/components/FollowUpChips'
+import ChatThread from '@/components/ChatThread'
+import type {
+  ApiEnvelope,
+  DatasetListItem,
+  DatasetResponse,
+  MessageOut,
+  MessageResponse,
+  QueryResult,
+  SessionHistoryResponse,
+  SessionResponse,
+} from '@/lib/types'
 
 type UploadState = 'idle' | 'uploading' | 'ready' | 'error'
 type AskState = 'idle' | 'asking' | 'answered' | 'error'
+
+// Order-independent canonical key for a set of dataset IDs.
+function datasetSetKey(ids: string[]): string {
+  return [...ids].sort().join('|')
+}
+
+// The dataset-set -> session_id registry is persisted so re-selecting the same
+// files after a browser reload resumes the same session (the server never dedups).
+const REGISTRY_KEY = 'da:session-registry'
+
+function loadRegistry(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(REGISTRY_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistRegistry(reg: Record<string, string>) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(REGISTRY_KEY, JSON.stringify(reg))
+  } catch {
+    /* ignore quota / privacy-mode errors */
+  }
+}
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -26,6 +65,78 @@ export default function Home() {
   const [askError, setAskError] = useState<string | null>(null)
   const [answer, setAnswer] = useState<QueryResult | null>(null)
 
+  // Phase 2 — library / multi-file sessions & persisted history.
+  const [libraryRefreshKey, setLibraryRefreshKey] = useState(0)
+  const [starting, setStarting] = useState(false)
+  const [activeDatasets, setActiveDatasets] = useState<DatasetListItem[]>([])
+  const [history, setHistory] = useState<MessageOut[]>([])
+  // Canonical dataset-set key -> session_id, so re-selecting the same files resumes.
+  // Empty on first render (matches SSR); hydrated from localStorage after mount.
+  const [sessionRegistry, setSessionRegistry] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    setSessionRegistry(loadRegistry())
+  }, [])
+
+  const registerSession = useCallback((ids: string[], sid: string) => {
+    setSessionRegistry(prev => {
+      const next = { ...prev, [datasetSetKey(ids)]: sid }
+      persistRegistry(next)
+      return next
+    })
+  }, [])
+
+  const loadHistory = useCallback(async (sid: string) => {
+    try {
+      const res = await fetch(`/sessions/${sid}`)
+      const body: ApiEnvelope<SessionHistoryResponse> = await res.json()
+      if (res.ok && !body.error && body.data) {
+        setHistory(body.data.messages)
+      } else {
+        setHistory([])
+      }
+    } catch {
+      setHistory([])
+    }
+  }, [])
+
+  async function handleStartSession(selected: DatasetListItem[]) {
+    const ids = selected.map(d => d.dataset_id)
+    setStarting(true)
+    setSessionError(null)
+    setAnswer(null)
+    setActiveDatasets(selected)
+
+    // Reuse an existing session for the exact same dataset set (order-independent).
+    const existing = sessionRegistry[datasetSetKey(ids)]
+    if (existing) {
+      setSessionId(existing)
+      await loadHistory(existing)
+      setStarting(false)
+      return
+    }
+
+    try {
+      const res = await fetch('/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataset_ids: ids }),
+      })
+      const body: ApiEnvelope<SessionResponse> = await res.json()
+      if (!res.ok || body.error || !body.data) {
+        setSessionError(body.error?.message ?? `Could not start a session (${res.status})`)
+      } else {
+        setSessionId(body.data.session_id)
+        registerSession(ids, body.data.session_id)
+        await loadHistory(body.data.session_id)
+      }
+    } catch {
+      setSessionError('Network error while starting a session — is the server running?')
+    } finally {
+      setStarting(false)
+    }
+  }
+
   async function uploadFile(file: File) {
     setUploadState('uploading')
     setUploadError(null)
@@ -33,6 +144,8 @@ export default function Home() {
     setAnswer(null)
     setSessionId(null)
     setSessionError(null)
+    setHistory([])
+    setActiveDatasets([])
 
     try {
       const form = new FormData()
@@ -48,19 +161,33 @@ export default function Home() {
 
       setDataset(body.data)
       setUploadState('ready')
+      // Surface the newly-uploaded file in the library sidebar immediately.
+      setLibraryRefreshKey(k => k + 1)
 
       // Automatically create a session scoped to this dataset, transparently.
       try {
+        const uploaded = body.data!
         const sessionRes = await fetch('/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataset_ids: [body.data!.dataset_id] }),
+          body: JSON.stringify({ dataset_ids: [uploaded.dataset_id] }),
         })
         const sessionBody: ApiEnvelope<SessionResponse> = await sessionRes.json()
-        if (!sessionRes.ok || sessionBody.error) {
+        if (!sessionRes.ok || sessionBody.error || !sessionBody.data) {
           setSessionError(sessionBody.error?.message ?? `Could not start a session (${sessionRes.status})`)
         } else {
-          setSessionId(sessionBody.data!.session_id)
+          setSessionId(sessionBody.data.session_id)
+          registerSession([uploaded.dataset_id], sessionBody.data.session_id)
+          setActiveDatasets([
+            {
+              dataset_id: uploaded.dataset_id,
+              filename: uploaded.filename,
+              row_count: uploaded.row_count,
+              column_count: uploaded.column_count,
+              status: uploaded.status,
+              created_at: new Date().toISOString(),
+            },
+          ])
         }
       } catch {
         setSessionError('Network error while starting a session — is the server running?')
@@ -116,6 +243,10 @@ export default function Home() {
         return
       }
 
+      // The persisted thread is the single source of truth for displayed answers.
+      // Refresh it so the new turn renders inside ChatThread, then keep only the
+      // latest result in `answer` to drive the follow-up chips (no standalone panel).
+      await loadHistory(sessionId)
       setAnswer(result)
       setAskState('answered')
     } catch {
@@ -214,15 +345,28 @@ export default function Home() {
             </>
           )}
 
+          {/* Persisted chat thread (resumed sessions) */}
+          {history.length > 0 && (
+            <section>
+              <h2 className="mb-2 text-lg font-semibold text-gray-900">Conversation</h2>
+              <ChatThread messages={history} />
+            </section>
+          )}
+
           {/* Ask panel */}
           <section>
             <h2 className="mb-2 text-lg font-semibold text-gray-900">2. Ask a question</h2>
-            {!dataset && (
+            {activeDatasets.length > 0 && (
+              <p className="mb-2 text-xs text-gray-500" data-testid="active-scope">
+                In scope: {activeDatasets.map(d => d.filename).join(', ')}
+              </p>
+            )}
+            {!sessionId && (
               <p className="text-sm text-gray-500" data-testid="ask-empty-state">
                 Ask a question about your data once it&apos;s uploaded.
               </p>
             )}
-            {dataset && (
+            {sessionId && (
               <form onSubmit={handleAsk} className="space-y-3">
                 <textarea
                   className="w-full rounded-lg border border-gray-300 p-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -256,43 +400,23 @@ export default function Home() {
               </div>
             )}
 
-            {answer && (
+            {/* The answer itself renders inside the ChatThread above (single source
+                of truth). Here we surface only the follow-up chips for the latest turn. */}
+            {answer && askState === 'answered' && (
               <div className="mt-4">
-                <AnswerPanel result={answer} />
+                <FollowUpChips questions={answer.follow_up_questions ?? []} onPick={setQuestion} />
               </div>
             )}
           </section>
-
-          {/* Suggested follow-ups stub */}
-          <StubPanel
-            title="Suggested follow-ups"
-            caption="Follow-up suggestions — coming soon"
-            testId="stub-follow-ups"
-          >
-            <div className="mt-2 flex flex-wrap gap-2">
-              {['Suggested question one', 'Suggested question two', 'Suggested question three'].map(chip => (
-                <span
-                  key={chip}
-                  className="cursor-not-allowed rounded-full bg-gray-200 px-3 py-1 text-xs text-gray-400"
-                >
-                  {chip}
-                </span>
-              ))}
-            </div>
-          </StubPanel>
         </div>
 
         {/* Sidebar: stubs */}
         <aside className="space-y-4">
-          <StubPanel
-            title="Library"
-            caption="Multi-file library — coming in a future phase"
-            testId="stub-library"
-          >
-            <ul className="mt-2 text-sm text-gray-500">
-              {dataset ? <li>{dataset.filename}</li> : <li className="italic text-gray-400">No file uploaded yet</li>}
-            </ul>
-          </StubPanel>
+          <LibrarySidebar
+            refreshKey={libraryRefreshKey}
+            onStartSession={handleStartSession}
+            starting={starting}
+          />
 
           <StubPanel title="Charts" caption="Charts — coming soon" testId="stub-charts">
             <div className="mt-2 flex h-24 items-center justify-center rounded border border-gray-200 bg-gray-50 text-xs text-gray-400">

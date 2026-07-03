@@ -9,7 +9,7 @@
 **Why not less:** the task inherently needs tool use (LLM-generated code must actually run against real data — pattern #22, LLM-Generated Code Execution) and branches by difficulty, so a bare prompt chain is insufficient.
 **Why not more:** roles don't genuinely differ enough to warrant multi-agent collaboration (#7) — one agent alternating between "write code" and "check/compose" covers the requirement.
 
-**Phase 1 scope:** only the `simple` branch is exercised for real (Tool Use + Reasoning, no Routing/Planning/Reflection escalation). `classify_query` is wired but hardcoded to return `"simple"`; `plan_steps` and `check_result` are stubs that are never reached. **Phase 2** ("Agentic Stack Upgrade" per `harness/patterns/phases.md`) replaces the stub with a real Gemini-flash routing call and activates `plan_steps`/`check_result`, completing the pattern composition above.
+**Phase 1 scope:** only the `simple` branch is exercised for real (Tool Use + Reasoning, no Routing/Planning/Reflection escalation). `classify_query` is wired but hardcoded to return `"simple"`; `plan_steps` and `check_result` are stubs that are never reached. **Phase 2** ("Agentic Stack Upgrade" per `harness/patterns/phases.md`) replaces the stub with a real Gemini-flash routing call and activates `plan_steps`/`check_result`, completing the pattern composition above. No graph-topology change is needed for this — every conditional edge listed below already exists from Phase 1; Phase 2 only swaps node *bodies*.
 
 ---
 
@@ -24,6 +24,8 @@
 | `compose_answer` | Gemini | `gemini-3.1-pro` | User-facing prose quality matters |
 
 Both model IDs are env-configurable (`AGENT_LLM_MODEL` for the `-pro` nodes, `AGENT_LLM_ROUTER_MODEL` for the router) per `harness/patterns/tech-stack.md`.
+
+**Per-call model override (Phase 2+):** `LLMClient`/`GeminiProvider` (Phase 1) only supported one configured model per client instance, which was sufficient while `classify_query` was hardcoded. Phase 2 adds an optional `model: str | None = None` keyword to both `LLMClient.call_model_with_usage` and `GeminiProvider.call_model_with_usage` (and the Anthropic provider, for interface parity): when passed, it overrides the provider's configured model for that single call only — `self._model`/`self._provider` are never mutated, so a `LLMClient()` instance can be reused across a router call (`gemini-2.5-flash`) and a `-pro` call (`gemini-3.1-pro`) in the same node without cross-contamination. `classify_query` is the only Phase 2 caller that passes `model=settings.llm_router_model or "gemini-2.5-flash"`; every other node omits it and gets the configured `AGENT_LLM_MODEL` default.
 
 **Fallback behaviour:** on a Gemini 4xx/5xx/timeout, the calling node catches the exception, sets `state["error"]`, and routes to `handle_error` — no retry-with-backoff in Phase 1 (single-call, user is watching); Phase 4 hardening adds bounded retry-with-backoff (max 2 retries, exponential) for transient 5xx/timeout only, never for 4xx (bad request/prompt).
 
@@ -80,7 +82,7 @@ class AgentState(TypedDict, total=False):
     table_data: dict | None                  # Phase 3
     chart_spec: dict | None                  # Phase 3
     export_path: str | None                  # Phase 3
-    follow_up_questions: list[str]           # Phase 3
+    follow_up_questions: list[str]           # Phase 2 — set by compose_answer, no extra LLM call
     anomaly_flags: list[str]                 # Phase 3
     cost_records: list[dict]                 # one per LLM call this run
 
@@ -142,9 +144,9 @@ Constants (env-configurable): `AGENT_MAX_ITERATIONS=4`, `AGENT_MAX_PLAN_STEPS=5`
 
 ### `compose_answer`
 **Reads from state:** `accumulated_summaries`, `question`, `conversation_history`
-**Writes to state:** `answer_text`, `key_numbers`, `table_data`, `chart_spec` (Phase 3), `follow_up_questions` (Phase 3), `anomaly_flags` (Phase 3)
+**Writes to state:** `answer_text`, `key_numbers`, `follow_up_questions` (Phase 2), `table_data` (Phase 3), `chart_spec` (Phase 3), `anomaly_flags` (Phase 3)
 **LLM call:** yes, `gemini-3.1-pro`
-**Behaviour:** Synthesizes the final plain-language answer from the accumulated structured summaries only — never from raw rows.
+**Behaviour:** Synthesizes the final plain-language answer from the accumulated structured summaries only — never from raw rows. **Phase 2:** the same single call also produces 2-3 follow-up questions at zero extra LLM-call cost. `src/prompts/compose_answer.md` instructs the model to end its response with a literal `---FOLLOW-UPS---` line followed by 2-3 `- `-prefixed questions. A new `_split_answer_and_follow_ups(text)` helper in `src/graph/nodes.py` splits the raw response on that marker *before* `_extract_key_numbers` runs its bolded-number regex against the prose portion only, so the two parsers never collide. If the marker is absent (model didn't follow the format), `follow_up_questions` is set to `[]` rather than failing the run.
 
 ### `handle_error`
 **Reads from state:** `error`, `run_id`, `session_id`
@@ -231,6 +233,8 @@ classify_query
 | **Across days** | Same `Session`/`Message` rows — no TTL/expiry in v1 | Full conversation history against a dataset, resumable after any gap |
 
 > **Assumed — Phase 1 has no conversational memory, by explicit deferral, not oversight.** The intake brief's fixed Phase 1 scope is "ask **one** natural-language question" per upload — a single question/answer pass, not a running chat thread. Multi-turn memory requires the `Session`/`Message` persistence and file-inference machinery that is the core deliverable of the `library-and-sessions` capability (Phase 2). Phase 1's `AgentState.conversation_history` is wired (the field exists, `load_context` reads it) but is always empty in Phase 1 since each upload starts a fresh, single-question session. This is called out explicitly per the self-review requirement on conversational memory, and is not a silent gap.
+>
+> **Phase 2 update:** `load_context` now populates `conversation_history` for real — it loads prior `Message` rows for `session_id` (ordered by `created_at`) whenever a session is resumed (including across a browser reload/days later, per `library-backend`'s `GET /sessions/{session_id}`). No change to `load_context`'s Phase 1 code path for a brand-new session (still starts with empty history) — this is additive, not a rewrite.
 
 **Context window management:** profiles and accumulated summaries are small (aggregate stats, not rows), so no summarization/truncation strategy is needed for the context sent to Gemini in v1; `conversation_history` (Phase 2+) is passed in full since a personal analysis session is not expected to run to context-window-threatening length, revisited in Phase 4 hardening if needed.
 

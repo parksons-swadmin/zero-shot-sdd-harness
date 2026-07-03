@@ -52,9 +52,22 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
 
 ### `GET /datasets` *(Phase 2)*
 
-**Purpose:** List the library of every uploaded/derived dataset.
+**Purpose:** List the library of every uploaded/derived dataset — a flat list, newest first, no tags/search (see `spec/roadmap.md` Phase 2 design decisions). Backs the frontend's "Library" sidebar checkbox list.
 
-**Response:** `{"data": {"datasets": [{dataset_id, filename, row_count, status, created_at}, ...]}, "error": null}`
+**Response:**
+```json
+{
+  "data": {
+    "datasets": [
+      {"dataset_id": "uuid-1", "filename": "month1.csv", "row_count": 12500, "column_count": 14, "status": "ready", "created_at": "2026-07-01T10:00:00Z"},
+      {"dataset_id": "uuid-2", "filename": "month2.csv", "row_count": 11800, "column_count": 14, "status": "ready", "created_at": "2026-07-02T09:00:00Z"}
+    ]
+  },
+  "error": null
+}
+```
+
+**Error cases:** none — an empty library returns `{"datasets": []}`.
 
 ### `GET /datasets/{dataset_id}` *(Phase 1, detail view)*
 
@@ -62,13 +75,15 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
 
 **Error cases:** `404` if `dataset_id` doesn't exist.
 
-### `POST /sessions` *(Phase 1, called internally on first upload; exposed for Phase 2 multi-session UI)*
+### `POST /sessions` *(Phase 1, called internally on first upload; Phase 2 — the "start a library session" endpoint, unchanged shape)*
 
-**Purpose:** Create a session scoped to one or more datasets.
+**Purpose:** Create a session scoped to one or more datasets. **Phase 2 usage:** the `frontend-library` slice calls this with every checked `dataset_id` from the library sidebar (not just one) — this is how cross-file sessions are created. Per `spec/roadmap.md` Phase 2 design decision #2, selecting a new file set always creates a **new** session over the union of selected IDs; there is no endpoint to mutate an existing session's `SessionDataset` scope. (The frontend may choose to reuse a session client-side if it already has one open for the exact same dataset-ID set, but the server itself performs no dedup — each call creates a fresh session.)
 
 **Request:** `{"dataset_ids": ["uuid", ...]}`
 
 **Response:** `{"data": {"session_id": "uuid", "dataset_ids": [...]}, "error": null}`
+
+**Error cases:** unchanged from Phase 1 — `422` if `dataset_ids` is empty, `404` if any `dataset_id` doesn't exist.
 
 ### `POST /sessions/{session_id}/messages` *(Phase 1 — the "ask" endpoint)*
 
@@ -90,7 +105,7 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
       "chart_spec": null,
       "export_dataset_id": null,
       "generated_code": "result = df[df['region'] == 'West']['revenue'].sum()",
-      "follow_up_questions": [],
+      "follow_up_questions": ["What is the total revenue for the East region?", "How does West compare to last month?"],
       "anomaly_flags": [],
       "step_count": 1,
       "status": "completed"
@@ -114,7 +129,40 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
 
 ### `GET /sessions/{session_id}` *(Phase 2)*
 
-**Purpose:** Fetch a session's full message + `QueryResult` history for the persisted chat-thread UI.
+**Purpose:** Fetch a session's dataset scope plus its full `Message` + `QueryResult` history, ordered oldest-first, for the persisted chat-thread UI (`ChatThread.tsx`). Called on page load/resume so a session survives a browser reload or a gap of days, per the roadmap's "conversations persist across days" requirement.
+
+**Response:**
+```json
+{
+  "data": {
+    "session_id": "uuid",
+    "dataset_ids": ["uuid-1", "uuid-2"],
+    "messages": [
+      {
+        "id": "uuid-msg-1", "role": "user", "content": "What is the combined total revenue across both months?",
+        "created_at": "2026-07-02T10:00:00Z", "query_result": null
+      },
+      {
+        "id": "uuid-msg-2", "role": "assistant", "content": "The combined total revenue is **$812,340.55**.",
+        "created_at": "2026-07-02T10:00:03Z",
+        "query_result": {
+          "id": "uuid-qr-1", "reasoning_mode": "simple",
+          "summary_text": "The combined total revenue is **$812,340.55**.",
+          "key_numbers": [{"label": "value_1", "value": "$812,340.55"}],
+          "table": null, "chart_spec": null, "export_dataset_id": null,
+          "generated_code": "result = df['revenue'].sum() + df2['revenue'].sum()",
+          "follow_up_questions": ["What was the split by month?", "Which region drove the growth?"],
+          "anomaly_flags": [], "step_count": 1, "status": "completed"
+        }
+      }
+    ]
+  },
+  "error": null
+}
+```
+Only `assistant` messages carry a non-null `query_result` (mirrors the `Message` 1—0/1 `QueryResult` relationship in `spec/data.md`).
+
+**Error cases:** `404` if `session_id` doesn't exist.
 
 ### `GET /query-results/{query_result_id}/export` *(Phase 3)*
 

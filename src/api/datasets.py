@@ -15,6 +15,8 @@ from domain.dataset import (
     DatasetUploadResponse,
     DatasetProfileOut,
     CleaningReportOut,
+    DatasetListItemOut,
+    DatasetListResponse,
 )
 from observability.events import get_logger
 from storage.files import (
@@ -184,6 +186,25 @@ def create_dataset(
 
     session.flush()
     return ok(_build_response(dataset, profile, report))
+
+
+@router.get("/datasets")
+def list_datasets(session: Session = Depends(get_session)) -> dict:
+    datasets = (
+        session.query(Dataset).order_by(Dataset.created_at.desc()).all()
+    )
+    items = [
+        DatasetListItemOut(
+            dataset_id=d.id,
+            filename=d.filename,
+            row_count=d.row_count,
+            column_count=d.column_count,
+            status=d.status,
+            created_at=d.created_at,
+        )
+        for d in datasets
+    ]
+    return ok(DatasetListResponse(datasets=items).model_dump())
 
 
 @router.get("/datasets/{dataset_id}")

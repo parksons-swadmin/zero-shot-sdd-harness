@@ -8,9 +8,9 @@ class AnthropicProvider:
         self._client = _sdk.Anthropic(api_key=api_key)
         self._model = model or self.DEFAULT_MODEL
 
-    def call_model(self, prompt: str, *, system: str | None = None) -> str:
+    def call_model(self, prompt: str, *, system: str | None = None, model: str | None = None) -> str:
         kwargs: dict = dict(
-            model=self._model,
+            model=model or self._model,
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )

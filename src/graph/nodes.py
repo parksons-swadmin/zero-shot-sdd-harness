@@ -27,9 +27,35 @@ logger = get_logger("graph")
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 _GENERATE_CODE_PROMPT_PATH = _PROMPTS_DIR / "generate_code.md"
 _COMPOSE_ANSWER_PROMPT_PATH = _PROMPTS_DIR / "compose_answer.md"
+_CLASSIFY_QUERY_PROMPT_PATH = _PROMPTS_DIR / "classify_query.md"
+_PLAN_STEPS_PROMPT_PATH = _PROMPTS_DIR / "plan_steps.md"
+_CHECK_RESULT_PROMPT_PATH = _PROMPTS_DIR / "check_result.md"
 
 _CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+
+_FOLLOW_UPS_MARKER = "---FOLLOW-UPS---"
+_VALID_MODES = ("simple", "iterative", "planned")
+
+
+def _parse_json_object(text: str) -> dict | list:
+    """Parse a JSON object/array from an LLM response, tolerating code fences
+    and surrounding prose. Raises ValueError if nothing parseable is found."""
+    cleaned = text.strip()
+    fence = _CODE_BLOCK_RE.search(cleaned)
+    if fence:
+        cleaned = fence.group(1).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    # Fall back to the first {...} or [...] span in the text.
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = cleaned.find(opener)
+        end = cleaned.rfind(closer)
+        if start != -1 and end != -1 and end > start:
+            return json.loads(cleaned[start:end + 1])
+    raise ValueError("No JSON payload found in LLM response")
 
 
 def _load_prompt(path: Path) -> str:
@@ -113,22 +139,101 @@ def load_context(state: AgentState) -> AgentState:
 # classify_query
 # --------------------------------------------------------------------------- #
 
+def _classify_query_prompt(question: str, profiles: list[dict]) -> str:
+    column_names: list[str] = []
+    for profile in profiles or []:
+        for col in profile.get("columns") or []:
+            name = col.get("name")
+            if name:
+                column_names.append(name)
+    lines = [f"## Question\n{question}"]
+    lines.append(f"\n## Column names\n{', '.join(column_names) if column_names else '(none provided)'}")
+    return "\n".join(lines)
+
+
 def classify_query(state: AgentState) -> AgentState:
-    # Phase 1: hardcoded to "simple" per spec/agent.md's documented phasing.
-    # Phase 2+ replaces this body with a real gemini-2.5-flash routing call
-    # producing {"mode": "simple"|"iterative"|"planned"}; the function
-    # signature/state contract is already shaped for that swap.
-    _log_node("classify_query", run_id=state.get("run_id"), duration_ms=0, status="ok", reasoning_mode="simple")
-    return {**state, "reasoning_mode": "simple"}
+    """Route the question to a reasoning mode via the cheap/fast router model.
+
+    On ANY LLM/parse error we fall back to "simple" — a router hiccup must
+    never block the answer. The router call is logged distinctly (node=
+    "classify_query", with its model) so it's visibly separate from the
+    generate/compose calls in stdout logs.
+    """
+    start = time.monotonic()
+    settings = get_settings()
+    router_model = settings.llm_router_model or "gemini-2.5-flash"
+    cost_records = list(state.get("cost_records") or [])
+    mode = "simple"
+    model = router_model
+    try:
+        system = _load_prompt(_CLASSIFY_QUERY_PROMPT_PATH)
+        prompt = _classify_query_prompt(state.get("question", ""), state.get("profiles") or [])
+        text, usage = LLMClient().call_model_with_usage(prompt, system=system, model=router_model)
+        model = usage.get("model", router_model)
+        parsed = _parse_json_object(text)
+        candidate = (parsed.get("mode") if isinstance(parsed, dict) else None)
+        if candidate in _VALID_MODES:
+            mode = candidate
+        cost_records.append({
+            "provider": "gemini", "model": model,
+            "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
+        })
+        duration_ms = int((time.monotonic() - start) * 1000)
+        _log_llm_call("classify_query", model=model, prompt_chars=len(prompt), duration_ms=duration_ms, status="ok",
+                      prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        _log_llm_call("classify_query", model=model, prompt_chars=0, duration_ms=duration_ms, status="error",
+                      error=str(exc))
+        mode = "simple"  # router hiccup must never block the answer
+
+    _log_node("classify_query", run_id=state.get("run_id"), duration_ms=int((time.monotonic() - start) * 1000),
+              status="ok", reasoning_mode=mode, model=model)
+    return {**state, "reasoning_mode": mode, "cost_records": cost_records}
 
 
 # --------------------------------------------------------------------------- #
 # plan_steps (Phase 2+ stub — unreachable in Phase 1)
 # --------------------------------------------------------------------------- #
 
+def _plan_steps_prompt(question: str, profiles: list[dict]) -> str:
+    return _classify_query_prompt(question, profiles)
+
+
 def plan_steps(state: AgentState) -> AgentState:
-    """Phase 2+ — unreachable in Phase 1 since classify_query never returns "planned"."""
-    return state
+    """Decompose a multi-part question into an ordered list of sub-questions
+    (default model). Only reached on the "planned" path. Caps to
+    settings.max_plan_steps and initialises current_step_index=0."""
+    start = time.monotonic()
+    settings = get_settings()
+    cost_records = list(state.get("cost_records") or [])
+    steps: list[str] = []
+    model = ""
+    try:
+        system = _load_prompt(_PLAN_STEPS_PROMPT_PATH)
+        prompt = _plan_steps_prompt(state.get("question", ""), state.get("profiles") or [])
+        text, usage = LLMClient().call_model_with_usage(prompt, system=system)
+        model = usage.get("model", "")
+        parsed = _parse_json_object(text)
+        if isinstance(parsed, list):
+            steps = [str(s) for s in parsed if str(s).strip()]
+        steps = steps[:settings.max_plan_steps]
+        cost_records.append({
+            "provider": "gemini", "model": model,
+            "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
+        })
+        duration_ms = int((time.monotonic() - start) * 1000)
+        _log_llm_call("plan_steps", model=model, prompt_chars=len(prompt), duration_ms=duration_ms, status="ok",
+                      prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        _log_llm_call("plan_steps", model=model, prompt_chars=0, duration_ms=duration_ms, status="error", error=str(exc))
+        # A planning hiccup degrades to answering the whole question in one step.
+        steps = [state.get("question", "")] if state.get("question") else []
+
+    _log_node("plan_steps", run_id=state.get("run_id"), duration_ms=int((time.monotonic() - start) * 1000),
+              status="ok", plan_step_count=len(steps))
+    return {**state, "plan_steps": steps, "current_step_index": 0, "cost_records": cost_records}
 
 
 # --------------------------------------------------------------------------- #
@@ -240,14 +345,90 @@ def execute_code(state: AgentState) -> AgentState:
 # check_result / advance_plan (Phase 2+ stubs — unreachable in Phase 1)
 # --------------------------------------------------------------------------- #
 
+def _current_question(state: AgentState) -> str:
+    plan = state.get("plan_steps") or []
+    idx = int(state.get("current_step_index") or 0)
+    if plan and 0 <= idx < len(plan):
+        return plan[idx]
+    return state.get("question", "")
+
+
+def _build_check_result_prompt(question: str, execution_result: dict | None, error: str | None) -> str:
+    lines = [f"## Current question\n{question}"]
+    if error:
+        lines.append(f"\n## Execution error\n{error}")
+    lines.append("\n## Structured result (aggregate/capped, never raw rows)")
+    lines.append(json.dumps(execution_result, default=str))
+    return "\n".join(lines)
+
+
 def check_result(state: AgentState) -> AgentState:
-    """Phase 2+ — unreachable in Phase 1 (the simple path skips check_result entirely)."""
-    return {**state, "check_decision": "accept"}
+    """Judge whether execution_result answers the current question. Writes
+    check_decision/check_feedback and increments iteration_count on refine.
+
+    Self-forces "accept" when iteration_count >= max_iterations OR
+    step_count >= max_total_steps so the loop is always bounded (edges.py
+    also enforces the caps, but the stored decision must be correct). On any
+    parse/LLM error we default to "accept" so a checker hiccup ends the loop
+    gracefully rather than hanging.
+    """
+    start = time.monotonic()
+    settings = get_settings()
+    iteration_count = int(state.get("iteration_count") or 0)
+    step_count = int(state.get("step_count") or 0)
+    cost_records = list(state.get("cost_records") or [])
+
+    if iteration_count >= settings.max_iterations or step_count >= settings.max_total_steps:
+        _log_node("check_result", run_id=state.get("run_id"), duration_ms=0, status="ok",
+                  check_decision="accept", forced_by_cap=True)
+        return {**state, "check_decision": "accept", "check_feedback": None, "cost_records": cost_records}
+
+    decision = "accept"
+    feedback: str | None = None
+    model = ""
+    try:
+        system = _load_prompt(_CHECK_RESULT_PROMPT_PATH)
+        prompt = _build_check_result_prompt(
+            _current_question(state), state.get("execution_result"), state.get("error"),
+        )
+        text, usage = LLMClient().call_model_with_usage(prompt, system=system)
+        model = usage.get("model", "")
+        parsed = _parse_json_object(text)
+        if isinstance(parsed, dict) and parsed.get("decision") in ("accept", "refine"):
+            decision = parsed["decision"]
+            feedback = parsed.get("feedback") or None
+        cost_records.append({
+            "provider": "gemini", "model": model,
+            "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
+        })
+        duration_ms = int((time.monotonic() - start) * 1000)
+        _log_llm_call("check_result", model=model, prompt_chars=len(prompt), duration_ms=duration_ms, status="ok",
+                      prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        _log_llm_call("check_result", model=model, prompt_chars=0, duration_ms=duration_ms, status="error",
+                      error=str(exc))
+        decision = "accept"  # checker hiccup ends the loop gracefully
+
+    new_state = {**state, "check_decision": decision, "check_feedback": feedback, "cost_records": cost_records}
+    if decision == "refine":
+        new_state["iteration_count"] = iteration_count + 1
+        # A refine on an errored execution clears the error so the retry runs.
+        new_state["error"] = None
+
+    _log_node("check_result", run_id=state.get("run_id"), duration_ms=int((time.monotonic() - start) * 1000),
+              status="ok", check_decision=decision, iteration_count=int(new_state.get("iteration_count") or 0))
+    return new_state
 
 
 def advance_plan(state: AgentState) -> AgentState:
-    """Phase 2+ — unreachable in Phase 1."""
-    return state
+    """Advance to the next planned sub-question. Non-LLM; edges.py's
+    after_advance_plan reads the incremented current_step_index."""
+    current_step_index = int(state.get("current_step_index") or 0) + 1
+    # Reset the per-step refine counter and stale check feedback for the new step.
+    _log_node("advance_plan", run_id=state.get("run_id"), duration_ms=0, status="ok",
+              current_step_index=current_step_index)
+    return {**state, "current_step_index": current_step_index, "iteration_count": 0, "check_feedback": None}
 
 
 # --------------------------------------------------------------------------- #
@@ -263,6 +444,35 @@ def _build_compose_answer_prompt(question: str, accumulated_summaries: list[dict
         for message in conversation_history:
             lines.append(f"{message.get('role')}: {message.get('content')}")
     return "\n".join(lines)
+
+
+def _split_answer_and_follow_ups(text: str) -> tuple[str, list[str]]:
+    """Split a compose_answer response on the literal ---FOLLOW-UPS--- marker.
+
+    The prose BEFORE the marker is the answer; the lines after (each stripped
+    of a leading "- "/"* " bullet) are the follow-up questions. If the marker
+    is absent, the whole text is the answer and follow-ups is []. Robust to a
+    missing marker so follow-up lines never pollute key-number extraction.
+    """
+    marker_index = text.find(_FOLLOW_UPS_MARKER)
+    if marker_index == -1:
+        return text.strip(), []
+    prose = text[:marker_index].strip()
+    tail = text[marker_index + len(_FOLLOW_UPS_MARKER):]
+    follow_ups: list[str] = []
+    for line in tail.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            stripped = stripped[2:].strip()
+        elif stripped.startswith("* "):
+            stripped = stripped[2:].strip()
+        elif stripped.startswith("-"):
+            stripped = stripped[1:].strip()
+        if stripped:
+            follow_ups.append(stripped)
+    return prose, follow_ups
 
 
 def compose_answer(state: AgentState) -> AgentState:
@@ -282,14 +492,18 @@ def compose_answer(state: AgentState) -> AgentState:
             "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
         })
 
-        answer_text = text.strip()
+        answer_text, follow_up_questions = _split_answer_and_follow_ups(text)
+        # Key numbers are extracted from the answer prose ONLY, never the
+        # follow-up questions (which may contain bolded text of their own).
         key_numbers = _extract_key_numbers(answer_text)
 
         duration_ms = int((time.monotonic() - start) * 1000)
         _log_llm_call("compose_answer", model=model, prompt_chars=len(prompt), duration_ms=duration_ms, status="ok",
                       prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
-        _log_node("compose_answer", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok")
-        return {**state, "answer_text": answer_text, "key_numbers": key_numbers, "cost_records": cost_records}
+        _log_node("compose_answer", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok",
+                  follow_up_count=len(follow_up_questions))
+        return {**state, "answer_text": answer_text, "key_numbers": key_numbers,
+                "follow_up_questions": follow_up_questions, "cost_records": cost_records}
     except Exception as exc:
         duration_ms = int((time.monotonic() - start) * 1000)
         _log_llm_call("compose_answer", model=model, prompt_chars=0, duration_ms=duration_ms, status="error", error=str(exc))
@@ -365,6 +579,7 @@ def finalize(state: AgentState) -> AgentState:
     reasoning_mode = state.get("reasoning_mode") or "simple"
     generated_code = state.get("generated_code", "")
     key_numbers = state.get("key_numbers") or []
+    follow_up_questions = state.get("follow_up_questions") or []
     step_count = int(state.get("step_count") or 0)
     settings = get_settings()
 
@@ -389,7 +604,7 @@ def finalize(state: AgentState) -> AgentState:
             chart_spec_json=None,
             export_dataset_id=None,
             generated_code=generated_code,
-            follow_up_questions_json=None,
+            follow_up_questions_json=(follow_up_questions or None),
             anomaly_flags_json=None,
             step_count=step_count,
             status=status,

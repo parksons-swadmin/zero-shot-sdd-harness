@@ -27,7 +27,7 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 - Library sidebar: shows only the single current dataset, with a persistent caption "Multi-file library — coming soon" (Phase 2 activates)
 - "Charts" panel: placeholder illustration + "Charts — coming soon" (Phase 3 activates)
 - "Export" button: visibly disabled with a tooltip "Export — coming soon" (Phase 3 activates)
-- "Suggested follow-ups" chip row: greyed-out placeholder chips, non-clickable, captioned "Suggested follow-ups — coming soon" (Phase 3 activates)
+- "Suggested follow-ups" chip row: greyed-out placeholder chips, non-clickable, captioned "Suggested follow-ups — coming soon" (Phase 2 activates — real, clickable chips populate the question box)
 - Cost badge: static badge reading "Cost tracking — coming soon" (Phase 3 activates)
 - Step-progress indicator: static bar/counter reading "Step tracking — coming soon" (Phase 3 activates; never an animated fake progress bar, per `harness/patterns/ui-ux.md`'s "never fake progress")
 

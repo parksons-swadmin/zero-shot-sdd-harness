@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -42,3 +44,16 @@ class DatasetUploadResponse(BaseModel):
     status: str
     profile: DatasetProfileOut
     cleaning_report: CleaningReportOut
+
+
+class DatasetListItemOut(BaseModel):
+    dataset_id: str
+    filename: str
+    row_count: int | None = None
+    column_count: int | None = None
+    status: str
+    created_at: datetime
+
+
+class DatasetListResponse(BaseModel):
+    datasets: list[DatasetListItemOut]
