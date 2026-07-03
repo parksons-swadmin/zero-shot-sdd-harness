@@ -357,7 +357,7 @@ export default function Home() {
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Data Analyst Agent</h1>
-          <p className="mt-1 text-sm text-gray-500">Upload a CSV, get an instant profile, ask questions about it.</p>
+          <p className="mt-1 text-sm text-gray-500">Upload a CSV, Excel, or PDF, get an instant profile, ask questions about it.</p>
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -398,13 +398,13 @@ export default function Home() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,.tsv,.xlsx"
+                accept=".csv,.tsv,.txt,.xlsx,.xls,.pdf"
                 className="hidden"
                 onChange={handleFileSelected}
                 data-testid="file-input"
               />
               {uploadState === 'idle' && (
-                <p className="text-sm text-gray-500">Upload a CSV to get started — drag &amp; drop or click to browse</p>
+                <p className="text-sm text-gray-500">Upload a CSV, Excel, or PDF export to get started — drag &amp; drop or click to browse</p>
               )}
               {uploadState === 'uploading' && (
                 <p className="text-sm font-medium text-blue-600" data-testid="upload-loading">

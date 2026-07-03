@@ -60,7 +60,7 @@ test.describe('Phase 1 — upload, profile & ask', () => {
 
   test('empty state before upload and disabled ask before a dataset exists', async ({ page }) => {
     await page.goto('./')
-    await expect(page.getByTestId('upload-dropzone')).toContainText('Upload a CSV to get started')
+    await expect(page.getByTestId('upload-dropzone')).toContainText('Upload a CSV, Excel, or PDF export to get started')
     await expect(page.getByTestId('ask-empty-state')).toContainText("Ask a question about your data once it's uploaded")
   })
 })

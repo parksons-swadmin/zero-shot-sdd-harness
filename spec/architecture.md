@@ -4,7 +4,7 @@
 
 ## System Overview
 
-A single-user, locally-run FastAPI service backed by SQLite, fronted by a Next.js static-export UI served at `/app`. The user uploads a CSV; the backend cleans and profiles it with real pandas code running against the full file; the user asks questions in natural language, which a LangGraph agent answers by having Gemini write pandas analysis code, running that code locally in a guarded sandbox against the real dataframe, and having Gemini compose the final plain-language answer from the code's structured (never raw-row) output. Everything the agent does — questions, code, results, cost — is written to a persistent audit trail.
+A single-user, locally-run FastAPI service backed by SQLite, fronted by a Next.js static-export UI served at `/app`. The user uploads a tabular file (CSV/TSV/TXT, Excel `.xlsx`/`.xls`, or — best-effort — a text-based PDF); ingestion parses it **fully locally** (pandas for delimited/Excel, pdfplumber for PDF — no cloud extraction, no data leaves the machine) into a single DataFrame; the backend then cleans and profiles it with real pandas code running against the full file; the user asks questions in natural language, which a LangGraph agent answers by having Gemini write pandas analysis code, running that code locally in a guarded sandbox against the real dataframe, and having Gemini compose the final plain-language answer from the code's structured (never raw-row) output. Everything the agent does — questions, code, results, cost — is written to a persistent audit trail.
 
 ## Component Map
 
@@ -22,13 +22,13 @@ FastAPI app (:8001)
     ▼
 graph/runner.py → graph/agent.py (LangGraph StateGraph)
     │
-    ├── tools/cleaning.py, tools/profiling.py   (trusted, our code — runs on FULL dataframe)
+    ├── tools/cleaning.py, tools/profiling.py, tools/pdf_extract.py (trusted, our code — parse/clean/profile the FULL dataframe, fully local)
     ├── llm/client.py → llm/providers/gemini.py (Gemini calls — schema/summary + code/results ONLY)
     └── execution/code_guard.py + execution/sandbox.py  (LLM-authored code — runs on FULL dataframe, real data never returns raw)
     │
     ▼
 db/session.py (SQLAlchemy) ──→ SQLite file (AGENT_DATABASE_URL)
-storage/files.py ──→ local filesystem (AGENT_DATA_DIR) — original + cleaned CSVs, exports
+storage/files.py ──→ local filesystem (AGENT_DATA_DIR) — original upload (real extension: .csv/.tsv/.txt/.xlsx/.xls/.pdf) + cleaned.parquet, exports
 ```
 
 ## Layers
@@ -45,8 +45,8 @@ storage/files.py ──→ local filesystem (AGENT_DATA_DIR) — original + clea
 
 ## Data Flow
 
-1. Trigger: user uploads a CSV via the browser.
-2. `api/datasets.py` streams the file to disk (`storage/files.py`), then `tools/cleaning.py` and `tools/profiling.py` run against the **full** file and write `Dataset`, `CleaningReport`, `DatasetProfile` rows. An `AuditLogEntry` is written for `upload`, `clean`, `profile`.
+1. Trigger: user uploads a tabular file (CSV/TSV/TXT, Excel, or PDF) via the browser.
+2. `api/datasets.py` streams the file to disk (`storage/files.py`) with its real extension, then parses it locally to a single DataFrame (pandas for delimited/Excel; `tools/pdf_extract.py`/pdfplumber for PDF — see Phase 3d), and `tools/cleaning.py` and `tools/profiling.py` run against the **full** DataFrame and write `Dataset`, `CleaningReport`, `DatasetProfile` rows. Format-specific ingest notes (PDF best-effort caveat, skipped Excel sheets/PDF tables) are appended to the `CleaningReport`. An `AuditLogEntry` is written for `upload`, `clean`, `profile`.
 3. User asks a question. `api/sessions.py` invokes `graph/runner.py`, which loads the relevant `DatasetProfile`(s) (never raw rows) and any prior `Message` history into `AgentState`, and runs the graph described in `spec/agent.md`.
 4. The graph has Gemini generate pandas code from the profile + question, executes it locally against the real dataframe via `execution/sandbox.py`, and has Gemini compose the final answer from the sandbox's structured, size-capped result.
 5. Output: a `Message` (assistant) + `QueryResult` (summary, key numbers, code, artifacts) are persisted; `CostRecord`(s) and `AuditLogEntry`(entries for `ask`, `code_exec`, `answer`) are written; the API returns the `QueryResult` to the browser.
@@ -78,6 +78,9 @@ storage/files.py ──→ local filesystem (AGENT_DATA_DIR) — original + clea
 | `google-genai` | >=2.9.0 | Gemini client (existing skeleton dependency) |
 | `langgraph` | >=0.1 | Agent graph (existing skeleton dependency) |
 | `python-multipart` | >=0.0.9 | FastAPI file-upload parsing |
+| `openpyxl` | >=3.1 | `pd.read_excel` engine for `.xlsx` workbooks |
+| `xlrd` | >=2.0 | `pd.read_excel` engine for legacy `.xls` workbooks (Phase 3d) |
+| `pdfplumber` | >=0.11 | Local, pure-Python best-effort table extraction from `.pdf` (Phase 3d) — no Ghostscript/Java/OCR, no network, so PDF parsing honors the raw-data-never-leaves-the-machine boundary |
 | `pyarrow` | >=16.0 | Fast columnar storage for cleaned/derived datasets (`.parquet`) |
 | `recharts` (frontend) | ^2 | Chart rendering from the aggregated `chart_spec.series` (Phase 3a) — added to `frontend/package.json` |
 
@@ -111,8 +114,8 @@ ${AGENT_DATA_DIR}/                       (default ./data, gitignored)
 ├── agent.db                             (SQLite — AGENT_DATABASE_URL=sqlite:///./data/agent.db)
 ├── uploads/
 │   └── <dataset_id>/
-│       ├── original.csv                 (byte-for-byte as uploaded, never mutated)
-│       └── cleaned.parquet              (post-cleaning, loaded for profiling + analysis)
+│       ├── original.<ext>               (byte-for-byte as uploaded, never mutated; real ext: .csv/.tsv/.txt/.xlsx/.xls/.pdf)
+│       └── cleaned.parquet              (post-parse+cleaning, loaded for profiling + analysis — same regardless of source format)
 └── exports/
     ├── _tmp/
     │   └── <uuid>.parquet               (Phase 3a — sandbox-written export_df, before promotion; deleted after promote)
@@ -121,7 +124,7 @@ ${AGENT_DATA_DIR}/                       (default ./data, gitignored)
         └── export.parquet               (Phase 3a — cleaned copy loaded for analysis, mirrors uploads/<id>/cleaned.parquet)
 ```
 
-Upload handling: the file is streamed to `original.csv` in chunks (never fully buffered in memory); requests exceeding `AGENT_MAX_UPLOAD_BYTES` (default `100_000_000`) are rejected with HTTP 413 before the write completes. Cleaning/profiling then loads the **full** file into a pandas DataFrame — a 100MB CSV (a few million rows of typical CRM/ops data) fits comfortably in memory on a personal machine; no row-sampling is used at any stage (see Phase-1 gate in `spec/roadmap.md`, which specifically tests this with a 10,000+ row fixture).
+Upload handling: the file is streamed to `original.<ext>` (its real extension) in chunks (never fully buffered in memory); requests exceeding `AGENT_MAX_UPLOAD_BYTES` (default `100_000_000`) are rejected with HTTP 413 before the write completes. Ingestion then parses the **full** file into a single pandas DataFrame (pandas for delimited/Excel; pdfplumber for PDF, all local — no cloud extraction service is ever contacted, preserving the raw-data boundary below), and writes `cleaned.parquet`; a 100MB CSV (a few million rows of typical CRM/ops data) fits comfortably in memory on a personal machine; no row-sampling is used at any stage (see Phase-1 gate in `spec/roadmap.md`, which specifically tests this with a 10,000+ row fixture).
 
 ## Artifacts Approach (Phase 3a)
 

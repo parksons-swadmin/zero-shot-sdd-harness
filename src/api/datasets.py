@@ -26,6 +26,7 @@ from storage.files import (
     remove_dataset_files,
 )
 from tools.cleaning import clean_dataset
+from tools.pdf_extract import extract_pdf_tables, NoExtractableTablesError
 from tools.profiling import build_profile
 
 router = APIRouter()
@@ -33,14 +34,43 @@ log = get_logger("datasets")
 
 _SPREADSHEET_EXTS = {".xlsx", ".xls"}
 _DELIMITED_EXTS = {".csv", ".tsv", ".txt"}
+_PDF_EXTS = {".pdf"}
+_ACCEPTED_EXTS = _DELIMITED_EXTS | _SPREADSHEET_EXTS | _PDF_EXTS
 
 
-def _load_dataframe(path: Path, ext: str) -> pd.DataFrame:
+def _load_excel(path: Path) -> tuple[pd.DataFrame, list[dict]]:
+    """Load the first sheet; note skipped sheets when the workbook has >1."""
+    issues: list[dict] = []
+    excel = pd.ExcelFile(path)
+    sheet_names = excel.sheet_names
+    first = sheet_names[0]
+    df = excel.parse(first)
+    if len(sheet_names) > 1:
+        others = sheet_names[1:]
+        issues.append(
+            {
+                "column": "*",
+                "issue_type": "excel_extra_sheets_skipped",
+                "action_taken": (
+                    f"loaded first sheet '{first}'; skipped: {', '.join(others)}"
+                ),
+                "affected_row_count": 0,
+                "needs_review": True,
+            }
+        )
+    return df, issues
+
+
+def _load_dataframe(path: Path, ext: str) -> tuple[pd.DataFrame, list[dict]]:
+    """Parse an uploaded file to a single DataFrame plus format-specific
+    cleaning-report issues (best-effort caveats, skipped sheets/tables)."""
+    if ext in _PDF_EXTS:
+        return extract_pdf_tables(path)
     if ext in _SPREADSHEET_EXTS:
-        return pd.read_excel(path)
+        return _load_excel(path)
     if ext == ".tsv":
-        return pd.read_csv(path, sep="\t")
-    return pd.read_csv(path)
+        return pd.read_csv(path, sep="\t"), []
+    return pd.read_csv(path), []
 
 
 def _write_audit(session: Session, dataset_id: str, event_type: str, detail: dict) -> None:
@@ -82,7 +112,10 @@ def create_dataset(
 
     filename = file.filename or "upload.csv"
     ext = Path(filename).suffix.lower() or ".csv"
-    if ext not in _DELIMITED_EXTS | _SPREADSHEET_EXTS:
+    if ext not in _ACCEPTED_EXTS:
+        # Truly-unknown extensions are still streamed and attempted as CSV so
+        # extension-less/misnamed delimited files parse; a real parse failure
+        # below returns the UNPARSEABLE_FILE 400.
         ext = ".csv"
 
     dataset_id = str(uuid4())
@@ -99,13 +132,26 @@ def create_dataset(
         raise api_error("STORAGE_ERROR", "Failed to write uploaded file to disk", 500)
 
     try:
-        df = _load_dataframe(original_path, ext)
+        df, ingest_issues = _load_dataframe(original_path, ext)
         if df.shape[1] == 0:
             raise ValueError("no columns parsed")
+    except NoExtractableTablesError as exc:
+        remove_dataset_files(dataset_id)
+        log.info("dataset_upload_pdf_no_tables", dataset_id=dataset_id, error=str(exc))
+        raise api_error(
+            "PDF_NO_TABLES",
+            "This PDF has no extractable tables — it may be scanned/image-based; "
+            "export to CSV instead.",
+            422,
+        )
     except Exception as exc:
         remove_dataset_files(dataset_id)
         log.info("dataset_upload_unparseable", dataset_id=dataset_id, error=str(exc))
-        raise api_error("UNPARSEABLE_FILE", "File is not a parseable CSV/TSV/XLSX", 400)
+        raise api_error(
+            "UNPARSEABLE_FILE",
+            "File is not a parseable CSV/TSV/TXT/Excel/PDF file",
+            400,
+        )
 
     dataset = Dataset(
         id=dataset_id,
@@ -135,6 +181,9 @@ def create_dataset(
         dataset.status = "cleaning"
         t1 = time.monotonic()
         cleaned_df, issues = clean_dataset(df)
+        # Prepend format-specific ingest notes (PDF best-effort caveat, skipped
+        # Excel sheets / PDF tables) so they surface in the cleaning report UI.
+        issues = ingest_issues + issues
         report = CleaningReport(dataset_id=dataset_id, issues_json=issues)
         session.add(report)
         _write_audit(

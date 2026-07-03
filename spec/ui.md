@@ -15,7 +15,7 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 **Purpose:** Upload a dataset, see its profile, ask a question, see the answer.
 
 **Key elements (real, Phase 1):**
-- Upload dropzone / file picker (empty state: "Upload a CSV to get started — drag & drop or click to browse")
+- Upload dropzone / file picker (empty state: "Upload a CSV, Excel, or PDF export to get started — drag & drop or click to browse"; `accept=".csv,.tsv,.txt,.xlsx,.xls,.pdf"` as of Phase 3d)
 - Upload progress indicator while the file streams to the server
 - Profile card once ready: row count, column count, a table of columns (name, type, null %, distinct count)
 - Cleaning report panel: list of what was auto-fixed, with any `needs_review` items visually flagged (not blocking)
@@ -82,9 +82,10 @@ Phase 1 ships one screen containing both the real Phase-1 flow and clearly-label
 
 ## Error States
 
-- **Upload error** (bad format / too large): the dropzone shows a specific message ("This file is larger than 100MB — try a smaller export" / "Couldn't read this as a CSV") with a retry affordance — never a raw exception.
+- **Upload error** (bad format / too large / unextractable PDF): the dropzone shows a specific message ("This file is larger than 100MB — try a smaller export" / "Couldn't read this as a CSV, Excel, or PDF" / for a scanned PDF: "This PDF has no extractable tables — it may be scanned/image-based; export to CSV instead") with a retry affordance — never a raw exception.
+- **PDF best-effort caveat** (Phase 3d): after a successful PDF upload, the cleaning-report area shows the `pdf_best_effort` `needs_review` note prominently ("Extracted best-effort from PDF — the table may be inaccurate; please verify against the source"), so a PDF import is never mistaken for a guaranteed-clean parse.
 - **Ask error** (run failed / timed out / 409 already-in-flight): the answer panel shows a plain-language message ("Couldn't answer that — the analysis code failed to run. Try rephrasing." for a code failure; "Still working on the previous question — try again in a moment" for 409) with the question re-editable, never a stack trace.
-- **Empty states:** upload screen before any file ("Upload a CSV to get started…"); ask panel before any question ("Ask a question about your data once it's uploaded").
+- **Empty states:** upload screen before any file ("Upload a CSV, Excel, or PDF export to get started…"); the upload input's `accept` filter is `.csv,.tsv,.txt,.xlsx,.xls,.pdf`; ask panel before any question ("Ask a question about your data once it's uploaded").
 - **Loading states:** upload progress bar (real, reflects actual bytes sent); "Thinking…" indicator while a question is in flight (Phase 1: simple spinner + text; Phase 3c: replaced by the real streaming step-progress indicator).
 
 ## Tech Stack

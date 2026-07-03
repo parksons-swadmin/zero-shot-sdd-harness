@@ -28,7 +28,7 @@ Replaces manually opening a spreadsheet, writing throwaway pivot tables/formulas
 - No external integrations (no CRM/API connectors, no email/Slack delivery) — standalone, local-file-in/answer-out only.
 - No multi-user accounts, auth, or sharing — single local user, no login system.
 - No natural-language write-back to the source files — the agent never mutates the user's original upload; cleaning produces a separate cleaned copy.
-- No support for file formats beyond CSV/spreadsheet exports readable by pandas (`.csv`, `.tsv`, `.xlsx`) in v1.
+- Ingestion covers tabular exports: delimited text (`.csv`, `.tsv`, `.txt`), Excel workbooks (`.xlsx`, `.xls`), and — **best-effort, Phase 3d** — table extraction from text-based `.pdf` files (see `spec/capabilities/dataset-ingestion.md`). PDF extraction is inherently unreliable and always surfaces a "verify this" caveat. **Scanned/image-only PDFs (no extractable text) are out of scope** and fail gracefully with a clear "export to CSV instead" message — no OCR. No other formats (Google Sheets links, JSON, XML, Parquet uploads, etc.) in v1.
 - No cloud/remote execution of analysis code — code execution is always local to the machine running the agent.
 - No open-ended chat unrelated to the loaded dataset(s) — the agent's scope is data analysis over uploaded files.
 
@@ -330,6 +330,52 @@ Replaces manually opening a spreadsheet, writing throwaway pivot tables/formulas
   4. See the answer's **per-query cost** and a **running total** in the cost badge (previously "Cost tracking — coming soon") — ask another question and watch the running total increase
   5. Everything from earlier phases (charts, tables, export, anomaly banner, follow-ups, library, history) still works exactly as before — this phase adds live feedback + cost visibility, it doesn't change the answers
   6. No "coming soon" stubs remain on the workspace — all Phase-1 placeholders are now live functionality
+
+### Phase 3d — PDF & Excel Ingestion Polish
+
+*(Incremental ingestion phase, additive — extends `dataset-ingestion` only; touches no graph/analysis/answer code, since the pipeline is format-agnostic once ingestion produces a single DataFrame. Requested via `/zero-shot-fix` after 3a–3c.)*
+
+- **Goal:** The user can upload a text-based **PDF** (a report/table export) or a legacy **`.xls`** workbook, and it flows through the exact same clean → profile → ask pipeline as a CSV — with clear best-effort caveats surfaced in the cleaning report for PDFs, a skipped-sheets note for multi-sheet Excel, and a graceful, human-readable failure (not a crash or a silent empty dataset) when a PDF has no extractable tables (scanned/image PDF). All parsing is **fully local** (pdfplumber, pure-Python — no cloud extraction, no Ghostscript/Java), preserving the raw-data-never-leaves-the-machine boundary. This is the smallest user-testable increment: no new answer/graph/UI feature, only broader ingestion.
+
+- **Capabilities delivered:** `dataset-ingestion` (accepted-formats extension: PDF best-effort table extraction; `.xls` support; multi-sheet `.xlsx` skipped-sheet note). See `spec/capabilities/dataset-ingestion.md`.
+
+- **Design decisions (Assumed, recorded not deferred — pinned in `spec/capabilities/dataset-ingestion.md`):**
+  1. **PDF library: `pdfplumber`** (pure-Python, no Ghostscript/Java/OCR, all local) — honors the no-data-leaves constraint. Added to `pyproject.toml`.
+  2. **PDF table rule:** extract per-page tables via `page.extract_tables()`; **concatenate tables that share a consistent column structure** (same column count + same first-row header) across pages into ONE DataFrame (the multi-page-report case); if multiple structurally-different tables exist, use the **largest** (by cell count; first on a tie) and record the others as **skipped** in the `CleaningReport`. First extracted row is the header.
+  3. **Best-effort caveat:** every PDF ingest adds a `CleaningReport` issue `{column: "*", issue_type: "pdf_best_effort", action_taken: "...", affected_row_count: <rows>, needs_review: true}` so the "verify this — extraction may be inaccurate" caveat is always visible on the profile screen.
+  4. **No extractable tables (scanned/image PDF):** fail with a clear `422 PDF_NO_TABLES` and message "This PDF has no extractable tables — it may be scanned/image-based; export to CSV instead." — never a crash or a silent empty dataset. The partial upload is cleaned up (`remove_dataset_files`), as for other unparseable files.
+  5. **`.xls`:** supported via the `xlrd` engine (added to `pyproject.toml`) — broad Excel support per the user's request.
+  6. **Multi-sheet `.xlsx`/`.xls`:** v1 loads the **first sheet only**; when a workbook has >1 sheet, add a `CleaningReport` issue `{column: "*", issue_type: "excel_extra_sheets_skipped", action_taken: "loaded first sheet '<name>'; skipped: <names>", needs_review: true}` so the user knows other sheets were dropped.
+  7. **No `source_format` DB column / no migration** — format is inferred from the filename suffix at ingest time (as today); the pipeline stores `cleaned.parquet` regardless of source format, so downstream is unchanged and no Alembic migration is needed (see `spec/data.md` → "Phase 3d note").
+
+- **Independent slices (parallel build units — disjoint file ownership; each builds against the contracts in `spec/capabilities/dataset-ingestion.md`/`spec/api.md`, not against another slice's code):**
+  - `ingestion-formats-backend` (backend) — deps: none (extends the existing Phase-1 ingestion path; no schema change). Owns exclusively:
+    - `src/api/datasets.py` — extend `_load_dataframe` to a `(df, extra_issues)` return: add `.pdf` handling via a new `src/tools/pdf_extract.py`; for `.xls`/`.xlsx` detect >1 sheet (`pd.ExcelFile(path).sheet_names`) and load the first with an extra skipped-sheets issue; append `extra_issues` into the `CleaningReport.issues_json` produced by `clean_dataset`; map the new `PDF_NO_TABLES` case to `422`; update `_SPREADSHEET_EXTS`/`_DELIMITED_EXTS` accepted set to include `.pdf`; update the `UNPARSEABLE_FILE` message text to name PDF too.
+    - `src/tools/pdf_extract.py` (new) — `extract_pdf_tables(path) -> tuple[pd.DataFrame, list[dict]]`: open with `pdfplumber`, run `page.extract_tables()` across pages, group by `(column_count, header_tuple)`, concatenate the consistent group / pick the largest, first row as header; raise `NoExtractableTablesError` when zero tables are found; return the frame plus the best-effort + skipped-tables `CleaningReport` issues.
+    - `pyproject.toml` — add `pdfplumber` and `xlrd` dependencies.
+    - `tests/unit/test_pdf_extract.py` (new) — pure unit tests over checked-in fixture PDFs: a single-table PDF → correct shape + header + a `pdf_best_effort` issue; a multi-page consistent-schema PDF → concatenated rows; a multi-different-table PDF → largest kept + a skipped-tables issue; a text-only/no-table PDF → `NoExtractableTablesError`.
+    - `tests/integration/test_phase3d_ingestion.py` (new) — see Gate #2.
+  - `frontend-upload-formats` (frontend) — deps: none (builds against the accepted-format list; no backend-code dependency). Owns exclusively:
+    - `frontend/src/app/page.tsx` — change the upload `<input accept=...>` to `.csv,.tsv,.txt,.xlsx,.xls,.pdf` and the dropzone/empty-state copy from "Upload a CSV" to "Upload a CSV, Excel, or PDF export". Only this slice edits the upload dropzone this phase.
+    - `frontend/tests/e2e/phase3d.spec.ts` (new) — upload a fixture PDF, assert the profile + cleaning report render with the "extraction may be inaccurate — verify" caveat visible; upload a fixture scanned/no-table PDF and assert the specific "no extractable tables" error message renders in the dropzone (not a crash/blank).
+
+- **Schema note:** **No new Alembic migration is required for Phase 3d.** Format is inferred from the filename suffix; `cleaned.parquet` is written regardless of source format; no `Dataset`/`DatasetProfile`/`CleaningReport` column is added or changed. The gate runs `uv run alembic current` only (must print the head revision).
+
+- **Gate command(s):**
+  1. `uv run alembic current` — confirm the DB is at head with no pending migration (no `alembic revision --autogenerate` this phase — see schema note).
+  2. `uv run pytest tests/unit/test_pdf_extract.py tests/integration/test_phase3d_ingestion.py -q` — real SQLite **file** DB (not `:memory:`), real local pdfplumber/pandas parsing (no LLM needed for ingestion). `test_phase3d_ingestion.py`: (a) `POST /datasets` with a **multi-page** fixture PDF whose full table has a pre-computed exact row count and a pre-computed numeric-column total → assert `row_count` equals the full extracted count (all pages concatenated, not just page 1) and the `cleaning_report.issues` contains a `pdf_best_effort` `needs_review:true` entry; (b) `POST /datasets` with a legacy `.xls` fixture → parses to `ready`; (c) `POST /datasets` with a multi-sheet `.xlsx` fixture → parses to `ready` with an `excel_extra_sheets_skipped` issue naming the skipped sheet(s); (d) `POST /datasets` with a scanned/no-table PDF fixture → asserts `422` with code `PDF_NO_TABLES` and no partial file left in `AGENT_DATA_DIR`. **Raw-data boundary:** these tests assert no network call is made during parsing (pdfplumber is local); the standard boundary tests from earlier phases remain unaffected (ingestion never calls the LLM).
+  3. `cd frontend && pnpm install && pnpm build` — CSS bundle contains real Tailwind utility selectors.
+  4. `cd frontend && npx playwright test tests/e2e/phase3d.spec.ts --reporter=line` — against `http://localhost:8001/app/` with the backend running: upload the fixture PDF, see the profile + a visible "verify — may be inaccurate" caveat render; upload the scanned/no-table PDF, see the specific error message (not a crash/blank).
+  5. `cd frontend && npx playwright test tests/e2e/phase1.spec.ts --reporter=line` — the Phase-1 CSV path still passes unchanged (ingestion extension is additive).
+  6. Working tree clean and pushed.
+
+- **How the user tests it (handoff seed):**
+  1. `cd frontend && pnpm install && pnpm build`, then from the repo root `uv run python -m src`
+  2. Open `http://localhost:8001/app/` — the upload control now accepts CSV, Excel (`.xlsx`/`.xls`), and PDF, and the copy says so
+  3. Upload a text-based PDF that contains a table (e.g. a report export) — the profile (columns, types, row count) renders, and the cleaning report shows a clear **"extracted best-effort — the table may be inaccurate, please verify"** note; ask a question about it exactly like a CSV
+  4. Upload a legacy `.xls` file and a multi-sheet `.xlsx` — both ingest; the multi-sheet one shows a note that only the first sheet was loaded and which sheets were skipped
+  5. Upload a scanned/image-only PDF (no selectable text) — you get a clear message "This PDF has no extractable tables — it may be scanned/image-based; export to CSV instead", not a crash or an empty dataset
+  6. Everything from earlier phases (charts, tables, export, anomaly banner, follow-ups, library, history, cost, streaming) is unchanged — this phase only broadens what you can upload
 
 ### Phase 4 — Hardening & Production Readiness *(trailing phase)*
 

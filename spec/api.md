@@ -10,9 +10,9 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
 
 ### `POST /datasets` *(Phase 1)*
 
-**Purpose:** Upload a CSV, auto-clean and auto-profile it.
+**Purpose:** Upload a tabular file, auto-clean and auto-profile it. Accepted formats: delimited text (`.csv`, `.tsv`, `.txt`), Excel (`.xlsx`, `.xls`), and — best-effort, Phase 3d — text-based PDF (`.pdf`). Format is inferred from the filename suffix; all parsing is fully local (see `spec/capabilities/dataset-ingestion.md` for per-format rules). PDF tables are extracted best-effort and always carry a "verify — may be inaccurate" caveat in the returned `cleaning_report`.
 
-**Request:** `multipart/form-data`, field `file` (CSV, max `AGENT_MAX_UPLOAD_BYTES`, default 100MB).
+**Request:** `multipart/form-data`, field `file` (`.csv`/`.tsv`/`.txt`/`.xlsx`/`.xls`/`.pdf`, max `AGENT_MAX_UPLOAD_BYTES`, default 100MB).
 
 **Response:**
 ```json
@@ -44,11 +44,12 @@ REST (FastAPI), JSON responses wrapped in the existing `ok(data)` / `api_error(c
 ```
 
 **Error cases:**
-| Status | Condition |
-|--------|-----------|
-| 400 | Not a parseable CSV/spreadsheet |
-| 413 | File exceeds `AGENT_MAX_UPLOAD_BYTES` |
-| 500 | Cleaning/profiling failure (disk I/O, malformed beyond recovery) |
+| Status | Code | Condition |
+|--------|------|-----------|
+| 400 | `UNPARSEABLE_FILE` | Not a parseable CSV/TSV/TXT/Excel/PDF file |
+| 413 | `FILE_TOO_LARGE` | File exceeds `AGENT_MAX_UPLOAD_BYTES` |
+| 422 | `PDF_NO_TABLES` | A `.pdf` had no extractable tables (likely scanned/image-based) — human message: "This PDF has no extractable tables — it may be scanned/image-based; export to CSV instead." No partial file is left on disk. (Phase 3d) |
+| 500 | `PROCESSING_FAILED` / `STORAGE_ERROR` | Cleaning/profiling failure (disk I/O, malformed beyond recovery) |
 
 ### `GET /datasets` *(Phase 2)*
 

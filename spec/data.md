@@ -167,6 +167,13 @@ Per-LLM-call token usage and estimated cost.
 
 The gate runs `alembic current` only (must print `0002`); no `alembic revision --autogenerate` this phase.
 
+## Phase 3d note — no new migration; format inferred from suffix, not stored
+
+**No new Alembic migration is required for Phase 3d.** Expanding ingestion to PDF/`.xls`/multi-sheet Excel changes only the *parsing* step, not the schema:
+> **Assumed (decision):** the `Dataset` entity does **not** gain a `source_format` column — the source format is inferred from the filename suffix at ingest time (as today, `Path(filename).suffix`) and is not needed downstream, because ingestion always produces a single DataFrame written to `cleaned.parquet` and every later stage (profiling, analysis, answers) reads that parquet format-agnostically. Adding a column would require a migration and a backfill for zero functional benefit, so it is deliberately omitted. If a future phase needs to display the origin format in the library, it can be re-derived from `Dataset.original_path`'s extension without a schema change.
+
+Format-specific ingest notes (PDF best-effort caveat, skipped Excel sheets, skipped PDF tables) are stored inside the existing `CleaningReport.issues_json` (new `issue_type` values `pdf_best_effort` / `pdf_tables_skipped` / `excel_extra_sheets_skipped` — a JSON-payload addition, not a DDL change). The gate runs `alembic current` only (must print the head revision); no `alembic revision --autogenerate` this phase.
+
 ## Data Lifecycle
 
 - **Dataset:** created `uploading` → `cleaning` → `ready` (or `error`); never auto-deleted or expired in v1 — the user's library is expected to persist indefinitely. Original files are never mutated after upload. **A derived/exported dataset (Phase 3a)** is created directly in `ready` status with `derived_from_query_result_id` set, and is otherwise indistinguishable from an upload for library listing and analysis.
@@ -178,6 +185,6 @@ The gate runs `alembic current` only (must print `0002`); no `alembic revision -
 ## Sensitive Data
 
 Uploaded CRM/ops exports may contain PII (names, emails, revenue figures). Mitigations:
-- Raw row values live only in `original.csv`/`cleaned.parquet` on the local filesystem — never copied into any DB text column, never included in a Gemini prompt (see `spec/architecture.md` boundary enforcement).
+- Raw row values live only in the original upload file (`original.<ext>` — `.csv`/`.tsv`/`.txt`/`.xlsx`/`.xls`/`.pdf`) and `cleaned.parquet` on the local filesystem — never copied into any DB text column, never included in a Gemini prompt (see `spec/architecture.md` boundary enforcement). PDF/Excel parsing is fully local (pdfplumber/pandas), so no file content is sent to any external service during ingestion.
 - `DatasetProfile.columns_json` and `AuditLogEntry.detail_json` store only aggregates/metadata (counts, dtypes, code, structured results) — reviewed at code-generation time to ensure no row-shaped payload is ever serialized into them.
 - No authentication/encryption-at-rest is added in v1 (single local user, local disk) — out of scope per `spec/roadmap.md`.
