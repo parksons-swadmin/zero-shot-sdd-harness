@@ -16,3 +16,9 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# Frontend build/test artifacts
+frontend/out/
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo

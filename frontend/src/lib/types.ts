@@ -1,0 +1,207 @@
+export interface TopValue {
+  value: string
+  count: number
+}
+
+export interface ProfileColumn {
+  name: string
+  dtype: string
+  null_count: number
+  distinct_count: number
+  min: number | null
+  max: number | null
+  mean: number | null
+  median: number | null
+  top_values: TopValue[] | null
+}
+
+export interface Profile {
+  columns: ProfileColumn[]
+}
+
+export interface CleaningIssue {
+  column: string
+  issue_type: string
+  action_taken: string
+  affected_row_count: number
+  needs_review: boolean
+}
+
+export interface CleaningReport {
+  issues: CleaningIssue[]
+}
+
+export interface DatasetResponse {
+  dataset_id: string
+  filename: string
+  row_count: number | null
+  column_count: number | null
+  status: string
+  profile: Profile
+  cleaning_report: CleaningReport
+}
+
+export interface SessionResponse {
+  session_id: string
+  dataset_ids: string[]
+}
+
+export interface KeyNumber {
+  label: string
+  value: string
+}
+
+// A single aggregated/binned point in a chart series (never a raw row).
+export interface ChartPoint {
+  x: string | number
+  y: number
+}
+
+// A chart definition built locally from the capped result. See spec/api.md.
+export interface ChartSpec {
+  type: 'bar' | 'line' | 'pie'
+  title: string
+  x_label: string
+  y_label: string
+  series: ChartPoint[]
+  truncated: boolean
+}
+
+// A ranked/summary table built locally from the capped result. See spec/api.md.
+export interface TableData {
+  title: string
+  columns: string[]
+  rows: Array<Array<string | number | null>>
+  total_rows: number
+  truncated: boolean
+}
+
+// A single data-quality issue the agent surfaced while answering. See spec/api.md.
+export interface AnomalyFlag {
+  type: string
+  column: string | null
+  severity: 'info' | 'warning' | 'critical'
+  message: string
+}
+
+// Per-query token/cost total, summed from CostRecord rows. See spec/api.md
+// (Phase 3c). Null before Phase 3c populated it. Carries only token counts + USD.
+export interface QueryCost {
+  prompt_tokens: number
+  completion_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface QueryResult {
+  id: string
+  reasoning_mode: string
+  summary_text: string
+  key_numbers: KeyNumber[] | null
+  table: TableData | null
+  chart_spec: ChartSpec | null
+  export_dataset_id: string | null
+  generated_code: string
+  follow_up_questions: string[] | null
+  anomaly_flags: AnomalyFlag[] | null
+  step_count: number
+  status: string
+  cost: QueryCost | null
+}
+
+// Running token/cost totals from GET /cost-summary. See spec/api.md (Phase 3c).
+export interface CostTotals {
+  prompt_tokens: number
+  completion_tokens: number
+  estimated_cost_usd: number
+  call_count: number
+}
+
+export interface CostSummaryResponse {
+  session: CostTotals | null
+  all_time: CostTotals
+}
+
+// SSE event payloads for POST /sessions/{id}/messages/stream. See spec/api.md.
+export interface StepEvent {
+  index: number
+  node: string
+  label: string
+  total_estimate: number
+}
+
+export interface AnswerChunkEvent {
+  text: string
+}
+
+export interface StreamResultEvent {
+  message_id: string
+  query_result: QueryResult
+}
+
+export interface StreamErrorEvent {
+  message: string
+  status: string
+}
+
+export interface MessageResponse {
+  message_id: string
+  query_result: QueryResult
+}
+
+export interface DatasetListItem {
+  dataset_id: string
+  filename: string
+  row_count: number | null
+  column_count: number | null
+  status: string
+  created_at: string
+}
+
+export interface DatasetListResponse {
+  datasets: DatasetListItem[]
+}
+
+export interface MessageOut {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+  query_result: QueryResult | null
+}
+
+export interface SessionHistoryResponse {
+  session_id: string
+  dataset_ids: string[]
+  messages: MessageOut[]
+}
+
+// A single audit-trail entry from GET /audit-log. See spec/api.md.
+export interface AuditLogEntry {
+  id: string
+  session_id: string | null
+  dataset_id: string | null
+  query_result_id: string | null
+  event_type: string
+  detail: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface AuditLogListResponse {
+  entries: AuditLogEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AuditLogParams {
+  session_id?: string
+  dataset_id?: string
+  event_type?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ApiEnvelope<T> {
+  data: T | null
+  error: { code?: string; message: string } | null
+}
