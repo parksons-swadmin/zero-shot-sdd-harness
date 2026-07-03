@@ -111,6 +111,7 @@ def load_context(state: AgentState) -> AgentState:
             raise ValueError("No datasets are in scope for this session")
 
         profiles: list[dict] = []
+        conversation_history: list[dict] = []
         with create_db_session() as session:
             for idx, dataset_id in enumerate(dataset_ids):
                 profile_row = (
@@ -127,13 +128,40 @@ def load_context(state: AgentState) -> AgentState:
                     if isinstance(profile_row.columns_json, dict) else profile_row.columns_json,
                 })
 
-        # Phase 1 has no multi-turn memory by explicit deferral (spec/agent.md ->
-        # Memory & Context): each session is a single question, so history is
-        # always empty here even though the field is wired for Phase 2+.
-        conversation_history: list[dict] = []
+            # Within-session memory (spec/agent.md -> Memory & Context;
+            # library-and-sessions capability): load prior Message rows for THIS
+            # session so a follow-up ("now break that down by region") reuses the
+            # prior turn's context. The current question is persisted only in
+            # `finalize` at the END of the run, so at load_context time these
+            # rows are exclusively PRIOR turns — the just-submitted question is
+            # never in this set and cannot duplicate into its own context.
+            #
+            # RAW-DATA BOUNDARY: Message.content holds only user question text
+            # and assistant answer prose (summary_text) — never row-level data —
+            # so feeding it into the compose_answer prompt keeps the raw-data
+            # boundary intact.
+            #
+            # Cost bound: only the most-recent N messages are kept
+            # (settings.conversation_history_max_messages) to keep the prompt
+            # bounded on long-running sessions.
+            session_id = state.get("session_id")
+            if session_id:
+                history_cap = get_settings().conversation_history_max_messages
+                message_rows = (
+                    session.query(Message)
+                    .filter(Message.session_id == session_id)
+                    .order_by(Message.created_at.asc(), Message.id.asc())
+                    .all()
+                )
+                if history_cap and history_cap > 0:
+                    message_rows = message_rows[-history_cap:]
+                conversation_history = [
+                    {"role": row.role, "content": row.content} for row in message_rows
+                ]
 
         duration_ms = int((time.monotonic() - start) * 1000)
-        _log_node("load_context", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok", dataset_count=len(dataset_ids))
+        _log_node("load_context", run_id=state.get("run_id"), duration_ms=duration_ms, status="ok",
+                  dataset_count=len(dataset_ids), history_count=len(conversation_history))
         return {**state, "profiles": profiles, "conversation_history": conversation_history}
     except Exception as exc:
         duration_ms = int((time.monotonic() - start) * 1000)

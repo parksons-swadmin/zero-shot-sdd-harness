@@ -9,7 +9,7 @@ class AgentState(TypedDict, total=False):
 
     # Input
     question: str
-    conversation_history: list[dict]        # [{role, content}] — always [] in Phase 1 (see spec/agent.md)
+    conversation_history: list[dict]        # [{role, content}] — prior-turn Messages for the session, loaded by load_context (see spec/agent.md)
     profiles: list[dict]                     # DatasetProfile summaries — schema/aggregate ONLY, never raw rows
 
     # Reasoning control

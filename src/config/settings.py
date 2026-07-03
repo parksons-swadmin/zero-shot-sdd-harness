@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=104_857_600)
     data_dir: str = Field(default="./data")
 
+    # Within-session conversation memory (see spec/agent.md -> Memory & Context).
+    # The most-recent N prior Message rows for the session are loaded by
+    # load_context into conversation_history and passed to compose_answer so a
+    # follow-up like "now break that down by region" reuses the prior turn's
+    # context. Capped to keep prompt cost bounded on long sessions.
+    # Env: AGENT_CONVERSATION_HISTORY_MAX_MESSAGES.
+    conversation_history_max_messages: int = Field(default=10)
+
     # Agent graph bounds (see spec/agent.md)
     max_iterations: int = Field(default=4)
     max_plan_steps: int = Field(default=5)

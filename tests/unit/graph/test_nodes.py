@@ -29,6 +29,68 @@ def test_load_context_loads_profiles_not_raw_rows(_isolated_db):
     assert result["conversation_history"] == []
 
 
+def test_load_context_populates_conversation_history_from_messages(_isolated_db):
+    """load_context must load prior Message rows for the session into
+    conversation_history (ordered oldest->newest), shaped as {role, content}."""
+    from datetime import datetime, timedelta, timezone
+
+    _seed(_isolated_db)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with Session(_isolated_db) as s:
+        s.add(Message(session_id="sess-1", role="user", content="what is total revenue?",
+                      created_at=base))
+        s.add(Message(session_id="sess-1", role="assistant", content="Total revenue is 6.",
+                      created_at=base + timedelta(seconds=1)))
+        # A message in a DIFFERENT session must never leak in.
+        s.add(SessionRow(id="sess-2"))
+        s.add(Message(session_id="sess-2", role="user", content="other-session question",
+                      created_at=base + timedelta(seconds=2)))
+        s.commit()
+
+    state = {"run_id": "r1", "session_id": "sess-1", "dataset_ids": ["ds-1"]}
+    result = load_context(state)
+
+    assert result.get("error") is None
+    history = result["conversation_history"]
+    assert history == [
+        {"role": "user", "content": "what is total revenue?"},
+        {"role": "assistant", "content": "Total revenue is 6."},
+    ]
+
+
+def test_load_context_history_capped_to_recent_window(_isolated_db):
+    """Only the most-recent N messages are kept, to bound prompt cost."""
+    import config.settings as settings_module
+    from datetime import datetime, timedelta, timezone
+
+    _seed(_isolated_db)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with Session(_isolated_db) as s:
+        for i in range(20):
+            role = "user" if i % 2 == 0 else "assistant"
+            # Explicit, strictly-increasing timestamps so created_at ordering is
+            # unambiguous (SQLite TIMESTAMP would otherwise tie on a tight loop).
+            s.add(Message(
+                session_id="sess-1", role=role, content=f"msg-{i}",
+                created_at=base + timedelta(seconds=i),
+            ))
+        s.commit()
+
+    settings_module._settings = None
+    import os
+    os.environ["AGENT_CONVERSATION_HISTORY_MAX_MESSAGES"] = "5"
+    try:
+        settings_module._settings = None
+        result = load_context({"run_id": "r1", "session_id": "sess-1", "dataset_ids": ["ds-1"]})
+    finally:
+        del os.environ["AGENT_CONVERSATION_HISTORY_MAX_MESSAGES"]
+        settings_module._settings = None
+
+    history = result["conversation_history"]
+    assert len(history) == 5
+    assert [m["content"] for m in history] == [f"msg-{i}" for i in range(15, 20)]
+
+
 def test_load_context_missing_dataset_sets_error(_isolated_db):
     state = {"run_id": "r1", "session_id": "sess-1", "dataset_ids": ["nope"]}
     result = load_context(state)
