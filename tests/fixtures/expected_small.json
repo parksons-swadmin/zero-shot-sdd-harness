@@ -1,0 +1,77 @@
+{
+  "as_of": "2026-01-15",
+  "row_count": 18,
+  "total_outstanding": 11175000.0,
+  "total_overdue": 8425000.0,
+  "total_outstanding_paise": 1117500000,
+  "total_overdue_paise": 842500000,
+  "pct_overdue": 0.7539149888143176,
+  "customer_count": 5,
+  "worst_bucket": "90+",
+  "bucket_totals": {
+    "current": 2250000.0,
+    "b_0_30": 1825000.0,
+    "b_31_60": 1500000.0,
+    "b_61_90": 1100000.0,
+    "b_90_plus": 4000000.0
+  },
+  "top_customers_by_overdue": [
+    {
+      "customer": "Beacon & Co",
+      "overdue_amount": 3750000.0,
+      "outstanding_amount": 3750000.0
+    },
+    {
+      "customer": "Acme Corp",
+      "overdue_amount": 2625000.0,
+      "outstanding_amount": 3925000.0
+    },
+    {
+      "customer": "श्री एंटरप्राइजेज",
+      "overdue_amount": 1050000.0,
+      "outstanding_amount": 1050000.0
+    },
+    {
+      "customer": "Müller Traders",
+      "overdue_amount": 1000000.0,
+      "outstanding_amount": 1450000.0
+    },
+    {
+      "customer": "Zenith Ltd",
+      "overdue_amount": 0.0,
+      "outstanding_amount": 1000000.0
+    }
+  ],
+  "data_quality": {
+    "flagged_row_count": 4,
+    "unparseable_row_count": 1,
+    "by_reason": {
+      "missing_due_date": 1,
+      "negative_amount": 1,
+      "zero_amount": 1,
+      "blank_employee": 1
+    }
+  },
+  "flags": [
+    {
+      "row_index": 14,
+      "field": "due_date",
+      "reason": "missing_due_date"
+    },
+    {
+      "row_index": 15,
+      "field": "amount",
+      "reason": "negative_amount"
+    },
+    {
+      "row_index": 16,
+      "field": "amount",
+      "reason": "zero_amount"
+    },
+    {
+      "row_index": 17,
+      "field": "employee",
+      "reason": "blank_employee"
+    }
+  ]
+}

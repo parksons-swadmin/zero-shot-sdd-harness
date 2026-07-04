@@ -1,22 +1,17 @@
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 
-@asynccontextmanager
-async def _lifespan(app: FastAPI):
-    from db.session import init_db
-    init_db()
-    yield
-
-
 def create_app() -> FastAPI:
-    app = FastAPI(title="Agent", version="0.1.0", lifespan=_lifespan)
-    from api import health, runs
+    app = FastAPI(title="AR Aging Dashboard", version="0.1.0")
+
+    # Stateless tool: no DB, no lifespan. Routes are pure functions of their input.
+    from api import analysis, health
+
     app.include_router(health.router)
-    app.include_router(runs.router)
+    app.include_router(analysis.router)
 
     # Serve the built Next.js static export at /app
     # Run `cd frontend && pnpm build` to generate frontend/out/ before starting.

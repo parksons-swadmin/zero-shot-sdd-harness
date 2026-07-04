@@ -3,6 +3,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Runtime settings for the fully-local AR aging tool.
+
+    No provider or database keys exist — the tool is stateless, no-LLM, no-network.
+    """
+
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
         env_file=".env",
@@ -10,16 +15,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = Field(default="sqlite:///./data/agent.db")
     log_level: str = Field(default="INFO")
-
-    # LLM provider — auto-detected from whichever key is set if left blank
-    llm_provider: str = Field(default="")   # "anthropic" | "gemini"
-    llm_model: str = Field(default="")      # uses provider default when blank
-
-    # Provider keys — set exactly one
-    anthropic_api_key: str = Field(default="")
-    gemini_api_key: str = Field(default="")
+    max_upload_mb: int = Field(default=25)
+    max_rows: int = Field(default=200000)
+    header_match_threshold: int = Field(default=85)
+    risk_top_n: int = Field(default=5)
 
 
 _settings: Settings | None = None

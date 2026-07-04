@@ -1,2 +1,26 @@
 @import "tailwindcss";
 @source "../";
+
+/* Custom rules below @source (the two lines above MUST stay first — Tailwind v4). */
+
+/* Respect reduced-motion: no essential meaning is carried by animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Kill animation/transition under print media (e.g. saving the dashboard to PDF). */
+@media print {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
