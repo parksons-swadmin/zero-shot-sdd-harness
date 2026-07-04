@@ -1,38 +1,34 @@
 # Capabilities Index
 
-> **Boilerplate status:** The spec-writer sub-agent creates one file per capability in this directory. Each file describes exactly one discrete thing the agent can do.
+> One file per capability. Each describes exactly one discrete thing the AR Aging Dashboard does. Phase tags map each capability to its build phase (see [roadmap.md](../roadmap.md)).
 
 ---
 
 ## What Is a Capability?
 
-A capability is a single, discrete action or behavior the agent performs. Examples:
-- "Search the web for companies matching criteria X"
-- "Draft a personalized email given a lead profile"
-- "Send a Slack notification when a threshold is crossed"
+A single, discrete behaviour of the dashboard — e.g. "compute the exact aging metrics", "render the Top-20 overdue chart", "export a multi-sheet Excel".
 
 ## Capabilities in This Project
 
-<!-- FILL IN: List capabilities here as they are defined. Each entry links to its spec file (no number prefix). -->
+| Capability | Phase | File |
+|-----------|-------|------|
+| XLSX Ingestion & Column Mapping | 1 | [xlsx_ingestion_and_mapping.md](xlsx_ingestion_and_mapping.md) |
+| Aging Metrics Engine (exact, deterministic) | 1 | [aging_metrics_engine.md](aging_metrics_engine.md) |
+| Headline Dashboard (KPIs + Top-20 chart) | 1 | [headline_dashboard.md](headline_dashboard.md) |
+| Employee-wise Summary | 2 | [employee_summary.md](employee_summary.md) |
+| Group Aging Breakdown & Weighted-Avg Days Overdue | 2 | [group_aging_breakdown.md](group_aging_breakdown.md) |
+| Proactive Flags (rule-based) | 2 | [proactive_flags.md](proactive_flags.md) |
+| Excel Export (multi-sheet .xlsx) | 3 | [excel_export.md](excel_export.md) |
+| Print-ready PDF Export | 3 | [pdf_export.md](pdf_export.md) |
+| Large-file Progress Feedback | 3 | [large_file_progress.md](large_file_progress.md) |
 
-| Capability | File |
-|-----------|------|
-| <!-- name --> | [name.md](name.md) |
+## Explicitly NOT a Capability (out of scope)
+
+- **DSO (Days Sales Outstanding)** — no sales/turnover column exists in the input; it is never computed, faked, or added as a future capability. See [roadmap.md](../roadmap.md).
+- **`.xls` / `.csv` / `.pdf` ingestion** — this build accepts `.xlsx` only.
+- **Persistence / history / multi-file / login / auto-watch** — the tool is stateless, one file at a time.
+- **Any LLM / AI-generated commentary** — every number is deterministic pandas arithmetic.
 
 ## How to Add a New Capability
 
-Run `/zero-shot-build [description]` on the existing spec. The spec-writer sub-agent will:
-1. Create a new file in this directory (`<name>.md`, no number prefix)
-2. Update this index
-3. Flag any dependencies on existing capabilities
-4. Self-review that it fits the architecture and data model before returning
-
-## Capability File Template
-
-Each capability file should answer:
-- **What it does** (one sentence)
-- **Inputs** (what data it receives)
-- **Outputs** (what it produces)
-- **External calls** (APIs, LLMs, databases it touches)
-- **Error cases** (what can go wrong and how it's handled)
-- **Success criteria** (how we test it)
+Run `/zero-shot-build [description]` on the existing spec. The spec-writer creates a new `<name>.md`, updates this index, flags dependencies, and self-reviews before returning.

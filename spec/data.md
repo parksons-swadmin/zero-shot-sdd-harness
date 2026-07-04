@@ -1,34 +1,106 @@
 # Data Model
 
-> Fill in this section — see comments below.
+> The AR Aging Dashboard is **stateless and holds no persistent data**. There is **no database**. Every model below is an **in-memory / over-the-wire** shape that lives only for the duration of a single request. See [architecture.md](architecture.md) for the "no DB" decision and rationale.
 
 ---
 
 ## Storage Technology
 
-<!-- FILL IN: What database/storage does this project use and why? -->
+**None.** No database, no ORM, no migrations. SQLAlchemy, Alembic, and the `src/db/` + `alembic/` directories are **removed** in Phase 1 (nothing is persisted). The uploaded file is parsed into memory, computed, returned, and discarded. No file is written to disk except a short-lived upload temp that is deleted after parse.
 
-## Entities
+Rationale: the product requirement is "stateless, fresh every upload, no memory, no DB persistence." Keeping an unused database would be dead infrastructure (violates the no-gold-plating rule). Consequently the Phase-1 gate has **no `alembic upgrade head` step** (see [roadmap.md](../roadmap.md)).
 
-<!-- FILL IN: One section per major entity. -->
+---
 
-### Entity: <!-- Name -->
+## Statelessness & the two-call flow
 
-<!-- FILL IN: What does this entity represent? -->
+There is **no server-side session or cache**. The mapping-confirmation flow is two stateless calls, and the client re-sends the file on the second call:
+
+1. `POST /api/preview` — file in, proposed mapping + preview out. Server keeps nothing.
+2. `POST /api/compute` — same file + confirmed mapping in, `DashboardResult` out. Server keeps nothing.
+
+Re-sending the file over loopback (localhost) is negligible for a local desktop tool, and true statelessness is the headline product constraint. See [api.md](api.md).
+
+---
+
+## Entities (in-memory Pydantic models, `src/domain/`)
+
+### Entity: `ColumnMapping`
+Confirmed mapping from the six canonical fields to source columns.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| id | <!-- type --> | yes | Primary key |
-| <!-- field --> | <!-- type --> | <!-- yes/no --> | <!-- description --> |
+| customer | str | yes | Source column name for customer |
+| invoice_no | str | yes | Source column for invoice number |
+| invoice_date | str | yes | Source column for invoice date |
+| due_date | str | yes | Source column for due date |
+| amount | str | yes | Source column for outstanding balance |
+| employee | str | yes | Source column for salesperson |
 
-### Relationships
+### Entity: `FieldMatch` (preview output)
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| field | str | yes | Canonical field name |
+| matched_column | str \| null | no | Best-matching source column (null if unmatched) |
+| confidence | int (0–100) | yes | rapidfuzz `token_sort_ratio` best score |
+| status | enum `high`\|`low`\|`unmatched` | yes | Confidence tier (see ingestion capability) |
 
-<!-- FILL IN: How do entities relate to each other? -->
+### Entity: `Invoice` (normalized row)
+One parsed invoice after the mapping is applied.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| row_index | int | yes | 0-based position in the source sheet (for audit) |
+| customer | str | yes | `"(blank)"` when source is empty |
+| invoice_no | str \| null | no | Retained as text |
+| invoice_date | date \| null | no | Parsed; null when unparseable (flagged) |
+| due_date | date \| null | no | Parsed; null when unparseable (flagged) |
+| amount_paise | int | yes | Amount as exact integer paise (see exactness rule) |
+| employee | str | yes | `"(blank)"` when source is empty |
+| dpd | int \| null | no | Days past due at `as_of`; null when due_date null |
+| bucket | enum `current`\|`0-30`\|`31-60`\|`61-90`\|`90+`\|`unclassified` | yes | `unclassified` when due_date null |
+
+### Entity: `AgingMetrics` (compute output)
+| Field | Type | Phase | Description |
+|-------|------|-------|-------------|
+| as_of | date | 1 | Reference date used for aging |
+| row_count | int | 1 | Total invoice rows processed |
+| total_outstanding | number (₹, 2dp) | 1 | Sum of all balances (exact) |
+| total_overdue | number (₹, 2dp) | 1 | Sum of overdue balances |
+| pct_overdue | float (0..1) | 1 | overdue ÷ outstanding |
+| customer_count | int | 1 | Distinct customers |
+| worst_bucket | enum bucket \| `none` | 1 | Largest overdue bucket (older wins ties) |
+| bucket_totals | `BucketTotals` | 1 | current + four overdue buckets (₹) |
+| top_customers_by_overdue | `list[CustomerOverdue]` (≤20) | 1 | Ranked desc by overdue |
+| employees | `list[EmployeeSummary]` | 2 | Ranked desc by outstanding |
+| customer_breakdown | `list[CustomerBreakdown]` | 2 | Per-customer buckets + weighted-avg-DPD |
+| employee_breakdown | `list[EmployeeBreakdown]` | 2 | Per-employee buckets + weighted-avg-DPD |
+| risk_flags | `list[RiskFlag]` | 2 | Riskiest accounts |
+| data_quality | `DataQualityReport` | 1 (counts) / 2 (full list) | Flagged rows |
+
+> Phase-1 responses omit or null the Phase-2 fields; the frontend shows labelled stubs for them.
+
+### Value objects
+- `BucketTotals`: `current`, `b_0_30`, `b_31_60`, `b_61_90`, `b_90_plus` — each a ₹ number (from exact paise).
+- `CustomerOverdue`: `customer`, `overdue_amount`, `outstanding_amount`.
+- `EmployeeSummary`: `employee`, `total_outstanding`, `total_overdue`, `pct_overdue`, `worst_bucket`, `invoice_count`.
+- `CustomerBreakdown` / `EmployeeBreakdown`: `key`, `bucket_totals`, `weighted_avg_days_overdue` (float \| null), `pct_overdue`, `total_outstanding`.
+- `RiskFlag`: `customer`, `reason`, `amount`, `bucket`.
+- `QualityFlag`: `row_index`, `field`, `reason`, `raw_value`.
+- `DataQualityReport`: `flagged_row_count`, `unparseable_row_count`, `by_reason` (`{reason: count}`), `rows` (`list[QualityFlag]`, Phase 2).
+
+### Value object: `DashboardResult`
+The `POST /api/compute` response payload = `AgingMetrics` plus `source_filename` and `sheet_name`. Single source of truth for the UI and both exports.
+
+---
+
+## Exactness rule (money)
+Every amount → integer paise once: `int(Decimal(str(amount)).quantize(Decimal("0.01"), ROUND_HALF_UP) * 100)`. All aggregation is integer `int64`. Reported ₹ = `paise / 100` to 2 decimals. This guarantees bit-exact tie-out to the source column regardless of row count/order (see [aging_metrics_engine.md](capabilities/aging_metrics_engine.md)).
+
+---
 
 ## Data Lifecycle
-
-<!-- FILL IN: When is data created, updated, and deleted? Is anything time-boxed or archived? -->
+Created on upload (parsed into memory) → computed → returned as JSON / export bytes → **discarded** when the request ends. Nothing is stored, cached, or logged in full (structured logs record counts and timings, never row contents / customer data).
 
 ## Sensitive Data
-
-<!-- FILL IN: What fields contain PII or secrets? How are they protected? -->
+The uploaded AR file contains customer names and balances (commercially sensitive). It **never leaves the machine**: no network egress, no third-party API, no LLM. Logs record aggregate counts/timings only — never customer names, balances, or file contents. The upload temp file is deleted immediately after parse.
