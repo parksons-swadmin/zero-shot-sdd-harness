@@ -62,6 +62,22 @@ No network, no LLM, no database. See [architecture.md](../architecture.md).
   > **Assumed:** `dayfirst=True` — Indian AR exports use dd/mm/yyyy. Ambiguous values (day ≤ 12) are parsed day-first; unparseable values are flagged, never guessed.
 - Upload size is capped at `AGENT_MAX_UPLOAD_MB` (default 25) and row count at `AGENT_MAX_ROWS` (default 200000); exceeding either returns a clear error.
 
+## Summary / total-row detection & exclusion
+Real ERP/SAP AR exports routinely embed subtotal / grand-total rows inside the sheet — a row whose customer or employee cell reads "Totals" or "Grand Total", or where all identity columns are blank but an aggregate amount is present. These are **not data rows**: summing them into the metrics double- or triple-counts the balance (a real file showed **3.00×** Total Outstanding because it carried TWO embedded "Totals" rows). Normalization therefore **detects and excludes** them before any aggregation, so the `invoices` handed to the [aging metrics engine](aging_metrics_engine.md) contain real data rows only.
+
+A normalized row is classified as a **SUMMARY/TOTAL row** — and excluded from **ALL** metrics (totals, % overdue, buckets, `customer_count`, Top-20, and every employee/customer aggregate) — when **EITHER**:
+- (a) its mapped `customer` **OR** `employee` text matches `/^\s*(grand\s+)?totals?\s*$/i`, or contains the phrase "grand total" (case-insensitive); **OR**
+- (b) its mapped `customer`, `due_date`, **AND** `invoice_no` are **all** blank while a numeric `amount` is present.
+
+**This is DISTINCT from "dropping data rows."** Real data rows are still **never dropped** (see the "No row is ever dropped silently" rule above and the flagged-row handling in [aging_metrics_engine.md](aging_metrics_engine.md)). Only detected aggregate/summary rows are removed from the computation set, and the excluded **count is surfaced transparently** — carried on the data-quality report as `by_reason["summary_row_excluded"]` (an integer count, key present only when > 0; see [data.md](../data.md)) and logged in the `metrics.computed`/`node.ingest` events. It is **never silent**. A visible dashboard note (e.g. "N summary/total rows detected and excluded") is a **Phase-2 frontend enhancement**; in Phase 1 the count is surfaced in the API response (`by_reason`) and server logs only.
+
+**Guardrails — the following must NOT be excluded (they are genuine data):**
+- a row with a **blank `employee`** but a real `customer` **and** `due_date` (an unassigned invoice — netted in normally, blank employee grouped under `"(blank)"`);
+- a **negative credit-note row with full identity** (`customer` + `invoice_no` + `due_date`) — netted in, never dropped, consistent with the negative-amount rule in the metrics engine;
+- a row **missing only `invoice_no`** but having `customer` **and** `due_date`.
+
+**Tie-out.** Once summary rows are excluded, `total_outstanding` ties out **exactly** to the file's own embedded "Totals" figure — the real file above drops from 3.00× back to 1.00× (a bit-exact match to its printed grand total).
+
 ## Success Criteria
 - [ ] Uploading `tests/fixtures/ar_small.xlsx` returns all six fields matched, five with `status=high` and the deliberately-renamed one detected at its documented confidence tier.
 - [ ] A file whose headers exactly equal the synonym seeds maps all six at `status=high` with score ≥ 85.
@@ -69,3 +85,5 @@ No network, no LLM, no database. See [architecture.md](../architecture.md).
 - [ ] Uploading a `.csv` or `.xls` is rejected with a message naming the accepted format.
 - [ ] Parse-time flags list exactly the seeded bad rows in `ar_small.xlsx` (missing due date, zero amount, negative amount, blank employee) by row index — none dropped.
 - [ ] Unicode customer names (`Müller Traders`, a Devanagari name) round-trip through parse and preview without corruption.
+- [ ] A file carrying TWO embedded "Totals" rows (customer cell = `Totals`) yields `total_outstanding` equal to the file's own single printed Totals figure, and `data_quality.by_reason["summary_row_excluded"] == 2` — matching the observed 3.00× → 1.00× correction.
+- [ ] A row whose employee cell reads `Grand Total`, and a row with blank `customer`+`due_date`+`invoice_no` but a numeric amount, are both excluded (counted in `by_reason["summary_row_excluded"]`); a blank-`employee`-but-real-`customer`+`due_date` row and a full-identity negative credit-note row are both **retained** and counted in `total_outstanding`.

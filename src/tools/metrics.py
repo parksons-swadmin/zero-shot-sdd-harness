@@ -43,7 +43,9 @@ def _worst_bucket(bucket_paise: dict[str, int], has_overdue: bool) -> str:
     return best
 
 
-def compute_metrics(df: pd.DataFrame, as_of: date, phase: int = 1) -> AgingMetrics:
+def compute_metrics(
+    df: pd.DataFrame, as_of: date, phase: int = 1, *, summary_row_excluded: int = 0
+) -> AgingMetrics:
     start = time.perf_counter()
 
     amount = df["amount_paise"].astype("int64")
@@ -112,6 +114,7 @@ def compute_metrics(df: pd.DataFrame, as_of: date, phase: int = 1) -> AgingMetri
         row_count=metrics.row_count,
         overdue_rows=int(overdue_mask.sum()),
         unparseable_rows=unparseable_row_count,
+        summary_rows_excluded=summary_row_excluded,
         customer_count=customer_count,
         worst_bucket=worst_bucket,
         duration_ms=round((time.perf_counter() - start) * 1000, 2),
@@ -119,18 +122,28 @@ def compute_metrics(df: pd.DataFrame, as_of: date, phase: int = 1) -> AgingMetri
     return metrics
 
 
-def build_data_quality_report(df: pd.DataFrame, flags: list[QualityFlag]) -> DataQualityReport:
+def build_data_quality_report(
+    df: pd.DataFrame, flags: list[QualityFlag], *, summary_row_excluded: int = 0
+) -> DataQualityReport:
     """Aggregate quality flags into the report attached to AgingMetrics.
 
     ``flagged_row_count`` = distinct rows with >= 1 flag; ``unparseable_row_count``
     = rows whose ``due_date`` is NaT; ``by_reason`` = count per reason. Phase-1
     leaves ``rows`` empty (the full list is a Phase-2 surface).
+
+    ``summary_row_excluded`` (embedded grand-total rows dropped before
+    aggregation) is surfaced under the ``summary_row_excluded`` ``by_reason`` key
+    for transparency — only when non-zero, so the wire shape stays stable when a
+    sheet has no embedded totals.
     """
     by_reason: dict[str, int] = {}
     flagged_rows: set[int] = set()
     for flag in flags:
         by_reason[flag.reason] = by_reason.get(flag.reason, 0) + 1
         flagged_rows.add(flag.row_index)
+
+    if summary_row_excluded:
+        by_reason["summary_row_excluded"] = summary_row_excluded
 
     return DataQualityReport(
         flagged_row_count=len(flagged_rows),

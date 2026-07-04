@@ -304,6 +304,81 @@ def build_large(path: Path, n: int = 60000, seed: int = 12345) -> dict:
     return expected
 
 
+# --------------------------------------------------------------------------- #
+# Synthetic embedded summary/grand-total fixture (built to a tmp path in tests;
+# NEVER committed and NEVER derived from any real customer file). Exercises the
+# SAP-style embedded-total-row exclusion without touching ar_small/expected_small.
+# --------------------------------------------------------------------------- #
+SUMMARY_HEADERS: dict[str, str] = {
+    "customer": "Payer Name",
+    "invoice_no": "Invoice No.",
+    "invoice_date": "Billing Date",
+    "due_date": "Due Date",
+    "amount": "Amount Due",
+    "employee": "Current Employee",
+}
+
+# Real invoice rows that MUST survive and net in (incl. the guardrails from the
+# diagnosis: a blank-employee row and a negative credit note, both with a real
+# customer + due date).
+SUMMARY_KEEP_ROWS: list[dict] = [
+    dict(customer="Acme Corp", invoice_no="K-001", invoice_date=_d(2025, 10, 1),
+         due_date=_d(2025, 11, 1), due_fmt="native", amount=1000000.00, employee="Ravi"),
+    dict(customer="Beacon & Co", invoice_no="K-002", invoice_date=_d(2025, 9, 1),
+         due_date=_d(2025, 10, 1), due_fmt="native", amount=500000.00, employee="Priya"),
+    # guardrail: blank employee, but real customer + due date -> KEPT
+    dict(customer="Acme Corp", invoice_no="K-003", invoice_date=_d(2025, 11, 1),
+         due_date=_d(2025, 12, 1), due_fmt="native", amount=250000.00, employee=None),
+    # guardrail: negative credit note with full identity -> KEPT, nets in
+    dict(customer="Beacon & Co", invoice_no="K-004", invoice_date=_d(2025, 11, 1),
+         due_date=_d(2025, 12, 1), due_fmt="native", amount=-100000.00, employee="Ravi"),
+]
+
+# Embedded summary/grand-total rows that MUST be excluded before aggregation.
+SUMMARY_EXCLUDE_ROWS: list[dict] = [
+    # (a) employee == "Totals", all dimensions blank -- the real-file pattern.
+    dict(customer=None, invoice_no=None, invoice_date=None,
+         due_date=None, due_fmt="blank", amount=999999999.00, employee="Totals"),
+    # (a) DUPLICATE "Totals" row (real exports embed more than one).
+    dict(customer=None, invoice_no=None, invoice_date=None,
+         due_date=None, due_fmt="blank", amount=999999999.00, employee="Totals"),
+    # (a) "Grand Total" variant on the employee column.
+    dict(customer=None, invoice_no=None, invoice_date=None,
+         due_date=None, due_fmt="blank", amount=888888888.00, employee="Grand Total"),
+    # (a) total marker on the CUSTOMER column (with a due date, so only rule (a) can catch it).
+    dict(customer="Totals", invoice_no="T-1", invoice_date=_d(2025, 11, 1),
+         due_date=_d(2025, 12, 1), due_fmt="native", amount=123456.00, employee="Ravi"),
+    # (b) bare total: numeric amount but no customer / due date / invoice number.
+    dict(customer=None, invoice_no=None, invoice_date=None,
+         due_date=None, due_fmt="blank", amount=777777777.00, employee=None),
+]
+
+SUMMARY_MAPPING = {
+    "customer": "Payer Name",
+    "invoice_no": "Invoice No.",
+    "invoice_date": "Billing Date",
+    "due_date": "Due Date",
+    "amount": "Amount Due",
+    "employee": "Current Employee",
+}
+
+
+def build_summary(path: Path, as_of: date = AS_OF) -> dict:
+    """Write KEEP + embedded summary rows; expected values tie out over KEEP only.
+
+    The workbook contains every row, but the returned oracle is computed over the
+    KEEP rows only -- so a correct pipeline (which excludes the summary rows) must
+    equal it, while any pipeline that sums the total rows blows the total up by
+    billions.
+    """
+    rows = SUMMARY_KEEP_ROWS + SUMMARY_EXCLUDE_ROWS
+    _write_workbook(path, SUMMARY_HEADERS, rows)
+    expected = compute_expected(SUMMARY_KEEP_ROWS, as_of)
+    expected["summary_row_excluded"] = len(SUMMARY_EXCLUDE_ROWS)
+    expected["mapping"] = dict(SUMMARY_MAPPING)
+    return expected
+
+
 def main() -> None:
     build_small()
     expected = compute_expected(SMALL_ROWS, AS_OF)

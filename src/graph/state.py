@@ -28,6 +28,8 @@ class AnalysisState(TypedDict, total=False):
     df: pd.DataFrame
     quality_flags: list[QualityFlag]
     risk_flags: list[RiskFlag]
+    # Count of embedded summary/grand-total rows excluded in node_ingest.
+    summary_row_excluded: int
 
     # Output
     metrics: AgingMetrics

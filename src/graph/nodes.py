@@ -22,8 +22,18 @@ def node_ingest(state: AnalysisState) -> AnalysisState:
         if raw_df is None:
             raw_df, _ = read_workbook(state["file_bytes"], state.get("sheet_name"))
         df = normalize(raw_df, state["mapping"], state["as_of"])
-        _log.info("node.ingest", run_id=state.get("run_id"), row_count=int(len(df)))
-        return {**state, "df": df}
+        # Exclude embedded summary/grand-total rows before any aggregation so
+        # they never inflate totals, buckets, customer_count, or the Top-N.
+        # The count is threaded downstream for transparency (log + report).
+        summary_excluded = int(df["is_summary"].sum())
+        df = df[~df["is_summary"]].drop(columns=["is_summary"]).reset_index(drop=True)
+        _log.info(
+            "node.ingest",
+            run_id=state.get("run_id"),
+            row_count=int(len(df)),
+            summary_rows_excluded=summary_excluded,
+        )
+        return {**state, "df": df, "summary_row_excluded": summary_excluded}
     except Exception as exc:  # noqa: BLE001 - fatal ingest failures route to handle_error
         return {**state, "error": str(exc)}
 
@@ -39,7 +49,12 @@ def node_validate(state: AnalysisState) -> AnalysisState:
 
 def node_compute(state: AnalysisState) -> AnalysisState:
     try:
-        metrics = compute_metrics(state["df"], state["as_of"], state.get("phase", 1))
+        metrics = compute_metrics(
+            state["df"],
+            state["as_of"],
+            state.get("phase", 1),
+            summary_row_excluded=state.get("summary_row_excluded", 0),
+        )
         return {**state, "metrics": metrics}
     except Exception as exc:  # noqa: BLE001
         return {**state, "error": str(exc)}
@@ -55,7 +70,11 @@ def node_flag(state: AnalysisState) -> AnalysisState:
 
 def node_assemble(state: AnalysisState) -> AnalysisState:
     metrics = state["metrics"]
-    metrics.data_quality = build_data_quality_report(state["df"], state.get("quality_flags", []))
+    metrics.data_quality = build_data_quality_report(
+        state["df"],
+        state.get("quality_flags", []),
+        summary_row_excluded=state.get("summary_row_excluded", 0),
+    )
     metrics.risk_flags = state.get("risk_flags", [])
     _log.info(
         "node.assemble",

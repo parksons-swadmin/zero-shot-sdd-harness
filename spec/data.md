@@ -87,7 +87,7 @@ One parsed invoice after the mapping is applied.
 - `CustomerBreakdown` / `EmployeeBreakdown`: `key`, `bucket_totals`, `weighted_avg_days_overdue` (float \| null), `pct_overdue`, `total_outstanding`.
 - `RiskFlag`: `customer`, `reason`, `amount`, `bucket`.
 - `QualityFlag`: `row_index`, `field`, `reason`, `raw_value`.
-- `DataQualityReport`: `flagged_row_count`, `unparseable_row_count`, `by_reason` (`{reason: count}`), `rows` (`list[QualityFlag]`, Phase 2).
+- `DataQualityReport`: `flagged_row_count`, `unparseable_row_count`, `by_reason` (`{reason: count}`), `rows` (`list[QualityFlag]`, Phase 2). Excluded embedded subtotal / grand-total rows are **not** a first-class field — their count is carried inside `by_reason` under the key `summary_row_excluded` (present only when > 0; see below).
 
 ### Value object: `DashboardResult`
 The `POST /api/compute` response payload = `AgingMetrics` plus `source_filename` and `sheet_name`. Single source of truth for the UI and both exports.
@@ -99,8 +99,11 @@ Every amount → integer paise once: `int(Decimal(str(amount)).quantize(Decimal(
 
 ---
 
+## Normalization & summary-row exclusion
+Before aggregation, normalization **marks and excludes embedded summary / total rows** (subtotal, "Totals", "Grand Total", or all-identity-blank-with-amount rows) so they never inflate the metrics — the detection rule is defined in [xlsx_ingestion_and_mapping.md](capabilities/xlsx_ingestion_and_mapping.md#summary--total-row-detection--exclusion). Excluded rows are **not** materialized as `Invoice` rows for the [metrics engine](capabilities/aging_metrics_engine.md); the engine's "every row" sums therefore operate on real data rows only. This is distinct from flagged rows: genuine data rows (blank employee, negative credit notes, missing invoice_no) are **retained**, never dropped. The count of excluded rows is surfaced transparently on `DataQualityReport.by_reason["summary_row_excluded"]` (an integer count, key present only when > 0; logged in the `metrics.computed`/`node.ingest` events) — never silent. Once excluded, `total_outstanding` ties out exactly to the file's own embedded Totals figure.
+
 ## Data Lifecycle
-Created on upload (parsed into memory) → computed → returned as JSON / export bytes → **discarded** when the request ends. Nothing is stored, cached, or logged in full (structured logs record counts and timings, never row contents / customer data).
+Created on upload (parsed into memory) → **normalized (summary rows excluded)** → computed → returned as JSON / export bytes → **discarded** when the request ends. Nothing is stored, cached, or logged in full (structured logs record counts and timings, never row contents / customer data).
 
 ## Sensitive Data
 The uploaded AR file contains customer names and balances (commercially sensitive). It **never leaves the machine**: no network egress, no third-party API, no LLM. Logs record aggregate counts/timings only — never customer names, balances, or file contents. The upload temp file is deleted immediately after parse.

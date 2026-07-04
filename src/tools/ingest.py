@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
@@ -20,6 +21,22 @@ from domain.mapping import ColumnMapping
 _EXCEL_EPOCH = date(1899, 12, 30)
 
 CANONICAL_COLUMNS = ["customer", "invoice_no", "invoice_date", "due_date", "amount", "employee"]
+
+_BLANK = "(blank)"
+
+# A cleaned customer/employee label that is exactly a total marker: "Total",
+# "Totals", "Grand Total(s)" (case-insensitive, surrounding whitespace ignored).
+# Anchored so a legitimate name like "Total Solutions Pvt Ltd" is NOT matched.
+_SUMMARY_TEXT_RE = re.compile(r"^\s*(grand\s+)?totals?\s*$", re.IGNORECASE)
+
+
+def _is_summary_text(text: str) -> bool:
+    """True when a cleaned customer/employee label is a total/summary marker."""
+    if not text or text == _BLANK:
+        return False
+    if _SUMMARY_TEXT_RE.match(text):
+        return True
+    return "grand total" in text.lower()
 
 
 def read_workbook(file_bytes: bytes, sheet_name: str | None = None) -> tuple[pd.DataFrame, list[str]]:
@@ -152,9 +169,11 @@ def normalize(df: pd.DataFrame, mapping: ColumnMapping, as_of: date) -> pd.DataF
     """Apply the confirmed mapping and produce the canonical invoice frame.
 
     Output columns: ``row_index, customer, invoice_no, invoice_date, due_date,
-    amount_paise, amount_valid, employee, dpd, bucket`` plus ``_raw_*`` columns
-    (original source values, used only to populate quality-flag ``raw_value``).
-    Rows are never dropped.
+    amount_paise, amount_valid, employee, dpd, bucket, is_summary`` plus
+    ``raw_*`` columns (original source values, used only to populate quality-flag
+    ``raw_value``). Rows are never dropped here; the ``is_summary`` flag marks
+    embedded grand-total / summary rows so the pipeline can exclude them from
+    aggregation without silently discarding data.
     """
     m = mapping.as_dict()
     raw_customer = df[m["customer"]]
@@ -167,23 +186,48 @@ def normalize(df: pd.DataFrame, mapping: ColumnMapping, as_of: date) -> pd.DataF
     n = len(df)
     out = pd.DataFrame({"row_index": range(n)})
 
-    out["customer"] = [_clean_text(v) for v in raw_customer]
-    out["employee"] = [_clean_text(v) for v in raw_employee]
-    out["invoice_no"] = [_optional_text(v) for v in raw_invoice_no]
+    customer_vals = [_clean_text(v) for v in raw_customer]
+    employee_vals = [_clean_text(v) for v in raw_employee]
+    invoice_vals = [_optional_text(v) for v in raw_invoice_no]
+    out["customer"] = customer_vals
+    out["employee"] = employee_vals
+    out["invoice_no"] = invoice_vals
 
     out["invoice_date"] = [_parse_date(v) for v in raw_invoice_date]
     due_dates = [_parse_date(v) for v in raw_due_date]
     out["due_date"] = due_dates
 
     amounts = [_parse_amount(v) for v in raw_amount]
+    amount_valid_vals = [ok for _, ok in amounts]
     out["amount_paise"] = pd.array([p for p, _ in amounts], dtype="int64")
-    out["amount_valid"] = [ok for _, ok in amounts]
+    out["amount_valid"] = amount_valid_vals
 
     dpd_vals: list[int | None] = [
         (as_of - d).days if isinstance(d, date) else None for d in due_dates
     ]
     out["dpd"] = pd.array(dpd_vals, dtype="Int64")
     out["bucket"] = [_bucket(d) for d in dpd_vals]
+
+    # Embedded summary/grand-total row detection. Real SAP AR exports append
+    # total rows to the sheet body; if summed they multiply the true total.
+    # A row is a SUMMARY row when EITHER
+    #   (a) its cleaned customer OR employee label is a total marker, OR
+    #   (b) it carries a numeric amount but has no customer, due date, or
+    #       invoice number (a bare total with all dimensions blank).
+    # Real invoice rows with a customer + due date (incl. blank-employee rows
+    # and negative credit notes) are never matched. Rows are flagged, not
+    # dropped — the pipeline excludes flagged rows before aggregation. The
+    # source lists are used directly (not the Series) so a blank invoice number
+    # stays ``None`` rather than being coerced to ``NaN``.
+    is_summary: list[bool] = []
+    for cust, emp, inv, due, amt_ok in zip(
+        customer_vals, employee_vals, invoice_vals, due_dates, amount_valid_vals
+    ):
+        summary = _is_summary_text(cust) or _is_summary_text(emp)
+        if not summary and cust == _BLANK and due is None and inv is None and amt_ok:
+            summary = True
+        is_summary.append(summary)
+    out["is_summary"] = is_summary
 
     # Raw values retained for faithful quality-flag reporting only.
     # (No leading underscore — itertuples cannot expose underscore-prefixed cols.)
