@@ -21,18 +21,22 @@ interface Tile {
 
 function Card({ tile }: { tile: Tile }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{tile.label}</p>
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {tile.label}
+      </p>
       <p
         data-testid={tile.testid}
         className={[
           'mt-2 text-2xl font-semibold tracking-tight tabular-nums',
-          tile.tone === 'danger' ? 'text-red-700' : 'text-slate-900',
+          tile.tone === 'danger'
+            ? 'text-red-700 dark:text-red-400'
+            : 'text-slate-900 dark:text-slate-100',
         ].join(' ')}
       >
         {tile.value}
       </p>
-      <p className="mt-1 text-xs text-slate-500">{tile.hint}</p>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{tile.hint}</p>
     </div>
   )
 }

@@ -26,6 +26,7 @@ None. Deterministic rules only. No LLM/network/DB.
 - **Riskiest accounts** = customers ranked by total `90+` overdue amount, descending; top N (`AGENT_RISK_TOP_N`, default 5) surfaced with reason `"largest 90+ overdue"`. Only customers with a non-zero `90+` balance qualify.
 - **Data-quality issues** surfaced (from parse/validate flags): missing/invalid due date, missing/invalid invoice date, negative amount, zero amount, non-numeric amount, blank employee, blank customer.
 - Every flagged / unparseable row is listed in the audit list with its **original row index** and raw value — **never dropped silently**. The panel shows counts per reason and lets the user see the offending rows.
+- *(Phase 3.2 presentation — see [ui.md](ui.md).)* The riskiest-accounts **risk flags stay inline** on the dashboard, while this per-row **data-quality audit** (flagged-rows table + by-reason breakdown) is surfaced **on demand** behind a "Data-quality audit" button/modal — an admin / spot-check view. The report **payload is unchanged**; only its presentation moves off the inline view.
 - Flags are advisory: they do not alter the computed totals (which include flagged rows per the tie-out rules in [aging_metrics_engine.md](aging_metrics_engine.md)).
 
 ## Success Criteria

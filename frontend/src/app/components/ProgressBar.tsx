@@ -36,11 +36,14 @@ export default function ProgressBar({ progress }: { progress: ComputeProgress })
     <section
       data-testid="progress-bar"
       aria-label="Compute progress"
-      className="no-print rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      className="no-print rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-sm font-medium text-slate-700">{phaseLabel(phase)}</p>
-        <p className="text-sm tabular-nums text-slate-600" data-testid="progress-total">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{phaseLabel(phase)}</p>
+        <p
+          className="text-sm tabular-nums text-slate-600 dark:text-slate-400"
+          data-testid="progress-total"
+        >
           {hasTotal ? `${intFmt(rows_done)} / ${intFmt(rows_total)} rows` : 'Preparing…'}
         </p>
       </div>
@@ -51,18 +54,18 @@ export default function ProgressBar({ progress }: { progress: ComputeProgress })
         aria-valuemax={hasTotal ? rows_total : undefined}
         aria-valuenow={hasTotal ? rows_done : undefined}
         aria-label="Rows processed"
-        className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200"
+        className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
       >
         <div
           className={[
-            'h-full rounded-full bg-blue-600 transition-[width] duration-200 ease-out',
+            'h-full rounded-full bg-blue-600 transition-[width] duration-200 ease-out dark:bg-blue-500',
             hasTotal ? '' : 'w-1/3 animate-pulse',
           ].join(' ')}
           style={hasTotal ? { width: `${clamped}%` } : undefined}
         />
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
         Streaming real progress — nothing leaves this machine.
       </p>
     </section>

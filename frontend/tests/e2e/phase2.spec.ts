@@ -63,9 +63,11 @@ test('upload → confirm → dashboard renders Phase-2 employee/breakdown/flags 
   // --- Risk flags + data-quality audit ---
   const flagsPanel = page.getByTestId('flags-panel')
   await expect(flagsPanel).toBeVisible()
-  // Beacon & Co is deepest in 90+ → listed among the riskiest accounts.
+  // Beacon & Co is deepest in 90+ → listed among the riskiest accounts (visible inline).
   await expect(page.getByTestId('risk-flags')).toContainText('Beacon & Co')
-  // The data-quality audit lists the seeded flagged rows (e.g. the negative-amount row 15).
+  // The full data-quality audit now lives behind an admin/spot-check button that opens
+  // a modal — open it, then assert the seeded flagged rows (e.g. the negative-amount row 15).
+  await page.getByTestId('data-quality-audit-button').click()
   const dqList = page.getByTestId('data-quality-list')
   await expect(dqList).toBeVisible()
   await expect(dqList).toContainText(/negative/i)

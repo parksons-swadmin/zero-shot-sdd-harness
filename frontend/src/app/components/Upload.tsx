@@ -53,10 +53,13 @@ export default function Upload({ onFileSelected, loading, error, onRetry }: Uplo
 
   return (
     <section aria-labelledby="upload-heading" className="mx-auto max-w-2xl">
-      <h2 id="upload-heading" className="mb-2 text-2xl font-semibold tracking-tight text-slate-900">
+      <h2
+        id="upload-heading"
+        className="mb-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100"
+      >
         Upload your AR aging export
       </h2>
-      <p className="mb-6 text-sm text-slate-600">
+      <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
         Everything runs on this machine — no data leaves your computer.
       </p>
 
@@ -69,22 +72,26 @@ export default function Upload({ onFileSelected, loading, error, onRetry }: Uplo
         onDrop={loading ? (e) => e.preventDefault() : onDrop}
         className={[
           'rounded-2xl border-2 border-dashed p-10 text-center transition-colors',
-          dragging ? 'border-blue-500 bg-blue-50' : 'border-slate-300 bg-white',
+          dragging
+            ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950/40'
+            : 'border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-900',
           loading ? 'opacity-60' : '',
         ].join(' ')}
       >
         {loading ? (
           <div className="flex flex-col items-center gap-3" role="status" aria-live="polite">
             <span
-              className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600"
+              className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600 dark:border-slate-600 dark:border-t-blue-400"
               aria-hidden="true"
             />
-            <p className="text-sm font-medium text-slate-700">Reading workbook…</p>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Reading workbook…
+            </p>
           </div>
         ) : (
           <>
             <svg
-              className="mx-auto mb-4 h-10 w-10 text-slate-400"
+              className="mx-auto mb-4 h-10 w-10 text-slate-400 dark:text-slate-500"
               fill="none"
               viewBox="0 0 24 24"
               strokeWidth={1.5}
@@ -97,10 +104,10 @@ export default function Upload({ onFileSelected, loading, error, onRetry }: Uplo
                 d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
               />
             </svg>
-            <p className="mb-1 text-base font-medium text-slate-800">
+            <p className="mb-1 text-base font-medium text-slate-800 dark:text-slate-200">
               Drag &amp; drop your AR aging file here
             </p>
-            <p className="mb-5 text-sm text-slate-500">or</p>
+            <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">or</p>
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
@@ -119,7 +126,7 @@ export default function Upload({ onFileSelected, loading, error, onRetry }: Uplo
                 e.target.value = ''
               }}
             />
-            <p className="mt-5 text-xs text-slate-500">
+            <p className="mt-5 text-xs text-slate-500 dark:text-slate-400">
               <span className="font-medium">.xlsx only</span> · up to {MAX_MB} MB
             </p>
           </>
@@ -129,7 +136,7 @@ export default function Upload({ onFileSelected, loading, error, onRetry }: Uplo
       {shownError && (
         <div
           role="alert"
-          className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+          className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
         >
           <p className="mb-3 font-medium">Couldn’t read that file</p>
           <p className="mb-4">{shownError}</p>
@@ -140,7 +147,7 @@ export default function Upload({ onFileSelected, loading, error, onRetry }: Uplo
               onRetry()
               inputRef.current?.click()
             }}
-            className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+            className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
           >
             Choose a different file
           </button>

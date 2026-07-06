@@ -6,13 +6,19 @@
 
 ## UI Type
 
-Web dashboard (single-page flow): **Upload → Mapping-confirm → Dashboard**, where **Mapping-confirm is auto-skipped** when the columns are confidently recognized (see the Auto-skip flow below). No login, no navigation menu — one focused flow.
+Web dashboard (single-page flow): **Upload → Mapping-confirm → Dashboard**, where **Mapping-confirm is auto-skipped** when the columns are confidently recognized (see the Auto-skip flow below). No login, no navigation menu — one focused flow, with a minimal top **header** carrying the product title and a light/dark **theme toggle** *(Phase 3.2 — see the Theme section below)*.
 
 ---
 
 ## INR formatting rule (global)
 
 Every monetary value renders via `Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 })` → e.g. `₹1,23,45,678.90` (lakh/crore digit grouping). `pct_overdue` renders as a percentage with one decimal (`41.5%`). One shared formatter utility; used everywhere.
+
+---
+
+## Theme (light / dark) — global *(Phase 3.2 — see [roadmap.md](roadmap.md))*
+
+A **theme toggle** in the app header switches light ↔ dark. On first load the theme follows the OS/browser preference (`prefers-color-scheme`); once the user picks a mode explicitly, that choice is remembered in `localStorage` and re-applied on the next visit. This `localStorage` theme flag is the **only** client-side persistence in the app — it is a UI preference that holds **no AR / business data**, so it does **not** violate the stateless / no-DB constraint. All screens, KPI tiles, charts (Recharts) and tables must be legible with WCAG-AA contrast in **both** themes. The **print / PDF layout always renders in the light style** regardless of the active theme (see the Phase-3 print stylesheet).
 
 ---
 
@@ -56,8 +62,9 @@ When `auto_mapped=false`, nothing changes: the Mapping Confirmation screen is sh
 - Export buttons: "Export Excel", "Print / Save as PDF" *(Phase 3)*
 - Large-file progress bar *(Phase 3)*
 
-**Phase 2 wires in:** employee table (ranked desc by outstanding), aging breakdown + weighted-avg columns, risk-flags panel with the audit list of flagged/unparseable rows.
+**Phase 2 wires in:** employee table (ranked desc by outstanding), aging breakdown + weighted-avg columns, and the risk-flags + data-quality panel (audit list of flagged/unparseable rows).
 **Phase 3 wires in:** working Excel export, working print-to-PDF, live progress bar for large files.
+**Phase 3.2 refines:** the **risk-flags** (riskiest 90+ accounts) stay **inline** on the dashboard, but the detailed **data-quality audit** (the per-row flagged-rows table + the by-reason breakdown — the technical "which rows are messy" view) is **no longer shown inline**; a **"Data-quality audit" button** opens it on demand in a modal/drawer, framed as an admin / spot-check view. The small **"N summary/total rows excluded"** tie-out note stays **visible inline** (it explains the totals). See [roadmap.md](roadmap.md) Phase 3.2.
 
 **States:** empty (before compute — dashboard hidden); loading ("Computing metrics…", real work); error (server/compute error with message + "Start over"); populated (ideal).
 

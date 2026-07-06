@@ -27,24 +27,27 @@ export default function EmployeeTable({ employees, employeeBreakdown }: Employee
     <section
       aria-labelledby="employee-table-heading"
       data-testid="employee-table"
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
     >
-      <h3 id="employee-table-heading" className="mb-1 text-lg font-semibold text-slate-900">
+      <h3
+        id="employee-table-heading"
+        className="mb-1 text-lg font-semibold text-slate-900 dark:text-slate-100"
+      >
         Employee-wise summary
       </h3>
-      <p className="mb-4 text-sm text-slate-500">
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
         Each salesperson ranked by total outstanding — so you know who to chase first.
       </p>
 
       {employees.length === 0 ? (
-        <p className="rounded-lg bg-slate-50 p-6 text-center text-sm text-slate-500">
+        <p className="rounded-lg bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
           No employee balances to summarise.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
           <table className="min-w-full text-left text-sm">
             <caption className="sr-only">Employee-wise outstanding and overdue summary</caption>
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">
                   Employee
@@ -69,39 +72,41 @@ export default function EmployeeTable({ employees, employeeBreakdown }: Employee
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {employees.map((e) => {
                 const isBlank = e.employee === '(blank)'
                 return (
                   <tr key={e.employee}>
-                    <td className="px-4 py-3 font-medium text-slate-800">
+                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
                       {isBlank ? (
-                        <span className="italic text-slate-500">(blank)</span>
+                        <span className="italic text-slate-500 dark:text-slate-400">(blank)</span>
                       ) : (
                         e.employee
                       )}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">
-                      {e.hod ? e.hod : <span className="text-slate-400">—</span>}
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
+                      {e.hod ? e.hod : <span className="text-slate-400 dark:text-slate-500">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-900">
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-slate-100">
                       {inr(e.total_outstanding)}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-red-700">
+                    <td className="px-4 py-3 text-right tabular-nums text-red-700 dark:text-red-400">
                       {inr(e.total_overdue)}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300">
                       {pct(e.pct_overdue)}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{bucketLabel(e.worst_bucket)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
+                      {bucketLabel(e.worst_bucket)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300">
                       {dpd(wavgByEmployee.get(e.employee) ?? null)}
                     </td>
                   </tr>
                 )
               })}
             </tbody>
-            <tfoot className="border-t border-slate-200 bg-slate-50 text-xs text-slate-500">
+            <tfoot className="border-t border-slate-200 bg-slate-50 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
               <tr>
                 <td colSpan={7} className="px-4 py-2">
                   {intFmt(employees.length)} employee{employees.length === 1 ? '' : 's'} · ranked by

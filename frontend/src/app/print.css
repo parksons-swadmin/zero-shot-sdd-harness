@@ -27,10 +27,21 @@
     margin: 12mm;
   }
 
-  /* Flatten the app background/spacing so the report reads cleanly on paper. */
+  /*
+   * PRINT ALWAYS RENDERS LIGHT, regardless of the active light/dark theme, so exported
+   * PDFs look clean. The primary mechanism is JS in page.tsx: a beforeprint/matchMedia
+   * listener strips the `.dark` class off <html> for the duration of printing (and the
+   * matchMedia('print') change fires under Playwright emulateMedia too), which
+   * neutralises every Tailwind `dark:` utility. These rules are the CSS-level backstop:
+   * force a white page and dark text on the base surfaces even if that class strip
+   * did not run.
+   */
   html,
-  body {
+  body,
+  html.dark,
+  html.dark body {
     background: #ffffff !important;
+    color: #0f172a !important;
   }
 
   /* Keep chart fills and coloured badges/amounts in the printed output. */

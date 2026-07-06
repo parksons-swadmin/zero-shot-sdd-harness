@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Upload from './components/Upload'
 import MappingConfirm from './components/MappingConfirm'
 import KpiTiles from './components/KpiTiles'
@@ -10,6 +10,7 @@ import AgingBreakdown from './components/AgingBreakdown'
 import FlagsPanel from './components/FlagsPanel'
 import ExportBar from './components/ExportBar'
 import ProgressBar from './components/ProgressBar'
+import ThemeToggle from './components/ThemeToggle'
 import { computeStream, postCompute, postPreview } from '@/lib/api'
 import { intFmt } from '@/lib/format'
 import {
@@ -49,6 +50,32 @@ export default function Home() {
   // skipped the confirm screen — drives the dismissible dashboard banner.
   const [autoMapped, setAutoMapped] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+
+  // PRINT/PDF must always render in the LIGHT style regardless of the active theme,
+  // so exported PDFs look clean. Strip the `.dark` class from <html> for the duration
+  // of printing (beforeprint), then restore it (afterprint). print.css only forces the
+  // page background; removing the class neutralises every `dark:` utility on paper.
+  useEffect(() => {
+    const root = document.documentElement
+    let wasDark = false
+    const onBefore = () => {
+      wasDark = root.classList.contains('dark')
+      if (wasDark) root.classList.remove('dark')
+    }
+    const onAfter = () => {
+      if (wasDark) root.classList.add('dark')
+    }
+    window.addEventListener('beforeprint', onBefore)
+    window.addEventListener('afterprint', onAfter)
+    const mql = window.matchMedia?.('print')
+    const onMedia = (e: MediaQueryListEvent) => (e.matches ? onBefore() : onAfter())
+    mql?.addEventListener?.('change', onMedia)
+    return () => {
+      window.removeEventListener('beforeprint', onBefore)
+      window.removeEventListener('afterprint', onAfter)
+      mql?.removeEventListener?.('change', onMedia)
+    }
+  }, [])
 
   // Run compute for an EXPLICIT mapping (never the closed-over state), so the
   // auto-skip path can compute the freshly-built mapping without waiting for a
@@ -178,12 +205,17 @@ export default function Home() {
 
   return (
     <main className="min-h-screen px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mx-auto mb-8 max-w-6xl">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">AR Aging Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Upload an AR aging export, confirm the columns, and see who owes what — fully local,
-          nothing leaves this machine.
-        </p>
+      <header className="mx-auto mb-8 flex max-w-6xl items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+            AR Aging Dashboard
+          </h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Upload an AR aging export, confirm the columns, and see who owes what — fully local,
+            nothing leaves this machine.
+          </p>
+        </div>
+        <ThemeToggle />
       </header>
 
       <div className="mx-auto max-w-6xl">
@@ -218,15 +250,25 @@ export default function Home() {
 
         {step === 'dashboard' && result && (
           <div className="space-y-8">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-700">
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
                   {result.source_filename}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Sheet <span className="font-medium text-slate-700">{result.sheet_name}</span> · as
-                  of <span className="font-medium text-slate-700">{result.as_of}</span> ·{' '}
-                  <span data-testid="dashboard-rowcount" className="font-medium text-slate-700">
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Sheet{' '}
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    {result.sheet_name}
+                  </span>{' '}
+                  · as of{' '}
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    {result.as_of}
+                  </span>{' '}
+                  ·{' '}
+                  <span
+                    data-testid="dashboard-rowcount"
+                    className="font-medium text-slate-700 dark:text-slate-300"
+                  >
                     {intFmt(result.row_count)} rows
                   </span>
                 </p>
@@ -236,7 +278,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={startOver}
-                  className="no-print rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  className="no-print rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-950"
                 >
                   Start over
                 </button>
@@ -247,7 +289,7 @@ export default function Home() {
               <div
                 data-testid="auto-mapped-banner"
                 role="status"
-                className="no-print flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"
+                className="no-print flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
               >
                 <span className="flex items-center gap-2">
                   <span aria-hidden="true">ℹ</span>
@@ -258,7 +300,7 @@ export default function Home() {
                     type="button"
                     onClick={onReviewMapping}
                     data-testid="review-mapping"
-                    className="font-medium underline underline-offset-2 hover:text-blue-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                    className="font-medium underline underline-offset-2 hover:text-blue-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:hover:text-blue-100"
                   >
                     Review / change mapping
                   </button>
@@ -266,7 +308,7 @@ export default function Home() {
                     type="button"
                     onClick={onDismissBanner}
                     aria-label="Dismiss auto-mapped notice"
-                    className="rounded p-1 leading-none text-blue-500 hover:bg-blue-100 hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                    className="rounded p-1 leading-none text-blue-500 hover:bg-blue-100 hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-blue-300 dark:hover:bg-blue-900 dark:hover:text-blue-100"
                   >
                     <span aria-hidden="true">×</span>
                   </button>

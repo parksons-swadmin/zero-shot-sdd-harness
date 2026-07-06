@@ -35,7 +35,7 @@ export default function ExportBar({ file, mapping, sheetName }: ExportBarProps) 
   }
 
   const btn =
-    'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+    'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-950'
 
   return (
     <div data-testid="export-bar" className="no-print flex flex-col items-start gap-2 sm:items-end">
@@ -60,12 +60,12 @@ export default function ExportBar({ file, mapping, sheetName }: ExportBarProps) 
       </div>
 
       {downloading && (
-        <p className="text-xs text-slate-500" role="status" aria-live="polite">
+        <p className="text-xs text-slate-500 dark:text-slate-400" role="status" aria-live="polite">
           Building your workbook…
         </p>
       )}
       {error && (
-        <p role="alert" className="max-w-xs text-xs text-red-700 sm:text-right">
+        <p role="alert" className="max-w-xs text-xs text-red-700 dark:text-red-400 sm:text-right">
           {error}
         </p>
       )}

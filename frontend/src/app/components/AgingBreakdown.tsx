@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { inr, pct, dpd, intFmt } from '@/lib/format'
+import { useIsDark } from '@/lib/theme'
 import type { BucketTotals, GroupBreakdown } from '@/lib/types'
 
 interface AgingBreakdownProps {
@@ -51,7 +52,7 @@ interface TipProps {
 function ChartTooltip({ active, payload }: TipProps) {
   if (!active || !payload?.length) return null
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-md">
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-md dark:border-slate-700 dark:bg-slate-800">
       {payload.map((p) => (
         <p key={p.name} className="tabular-nums" style={{ color: p.color }}>
           {p.name}: {inr(p.value)}
@@ -63,9 +64,17 @@ function ChartTooltip({ active, payload }: TipProps) {
 
 export default function AgingBreakdown({ bucketTotals, customerBreakdown }: AgingBreakdownProps) {
   const [showAll, setShowAll] = useState(false)
+  const isDark = useIsDark()
   const total = customerBreakdown.length
   const isCapped = total > DEFAULT_VISIBLE
   const visibleRows = showAll ? customerBreakdown : customerBreakdown.slice(0, DEFAULT_VISIBLE)
+
+  // Theme-aware chart chrome. Bucket segment fills keep their meaning in both themes;
+  // only ticks / legend / hover cursor shift for legibility on a dark canvas.
+  const xTickFill = isDark ? '#94a3b8' : '#64748b'
+  const yTickFill = isDark ? '#cbd5e1' : '#334155'
+  const legendColor = isDark ? '#cbd5e1' : '#334155'
+  const cursorFill = isDark ? 'rgba(148,163,184,0.15)' : '#f1f5f9'
 
   const chartData = [
     {
@@ -82,12 +91,15 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
     <section
       aria-labelledby="aging-breakdown-heading"
       data-testid="aging-breakdown"
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
     >
-      <h3 id="aging-breakdown-heading" className="mb-1 text-lg font-semibold text-slate-900">
+      <h3
+        id="aging-breakdown-heading"
+        className="mb-1 text-lg font-semibold text-slate-900 dark:text-slate-100"
+      >
         Aging breakdown
       </h3>
-      <p className="mb-4 text-sm text-slate-500">
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
         How the total outstanding splits across the aging buckets, and each customer&apos;s
         weighted-average days overdue.
       </p>
@@ -100,15 +112,15 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
             data={chartData}
             margin={{ top: 8, right: 28, bottom: 8, left: 8 }}
           >
-            <XAxis type="number" tickFormatter={compactInr} tick={{ fontSize: 11, fill: '#64748b' }} />
+            <XAxis type="number" tickFormatter={compactInr} tick={{ fontSize: 11, fill: xTickFill }} />
             <YAxis
               type="category"
               dataKey="name"
               width={90}
-              tick={{ fontSize: 12, fill: '#334155' }}
+              tick={{ fontSize: 12, fill: yTickFill }}
             />
-            <Tooltip content={<ChartTooltip />} cursor={{ fill: '#f1f5f9' }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Tooltip content={<ChartTooltip />} cursor={{ fill: cursorFill }} />
+            <Legend wrapperStyle={{ fontSize: 12, color: legendColor }} />
             {SEGMENTS.map((s) => (
               <Bar
                 key={s.key}
@@ -126,25 +138,30 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
       {/* Per-customer breakdown table */}
       <div className="mt-6">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h4 className="text-sm font-semibold text-slate-700">Per-customer breakdown</h4>
+          <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Per-customer breakdown
+          </h4>
           {isCapped && (
-            <span className="text-xs text-slate-500" data-testid="customer-breakdown-count">
+            <span
+              className="text-xs text-slate-500 dark:text-slate-400"
+              data-testid="customer-breakdown-count"
+            >
               Showing top {intFmt(visibleRows.length)} of {intFmt(total)} customers by outstanding
             </span>
           )}
         </div>
         {customerBreakdown.length === 0 ? (
-          <p className="rounded-lg bg-slate-50 p-6 text-center text-sm text-slate-500">
+          <p className="rounded-lg bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
             No customer balances to break down.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
             <table
               data-testid="customer-breakdown-table"
               className="min-w-full text-left text-sm"
             >
               <caption className="sr-only">Per-customer aging bucket amounts</caption>
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                 <tr>
                   <th scope="col" className="px-4 py-3 font-semibold">
                     Customer
@@ -162,26 +179,30 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {visibleRows.map((c) => {
                   const isBlank = c.key === '(blank)'
                   return (
                     <tr key={c.key}>
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">
-                        {isBlank ? <span className="italic text-slate-500">(blank)</span> : c.key}
+                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
+                        {isBlank ? (
+                          <span className="italic text-slate-500 dark:text-slate-400">(blank)</span>
+                        ) : (
+                          c.key
+                        )}
                       </td>
                       {SEGMENTS.map((s) => (
                         <td
                           key={s.key}
-                          className="px-4 py-3 text-right tabular-nums text-slate-700"
+                          className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300"
                         >
                           {inr(c.bucket_totals[s.key])}
                         </td>
                       ))}
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300">
                         {pct(c.pct_overdue)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300">
                         {dpd(c.weighted_avg_days_overdue)}
                       </td>
                     </tr>
@@ -198,7 +219,7 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
               type="button"
               onClick={() => setShowAll((v) => !v)}
               data-testid="customer-breakdown-toggle"
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-900"
             >
               {showAll ? `Show top ${DEFAULT_VISIBLE}` : `Show all ${intFmt(total)} customers`}
             </button>
