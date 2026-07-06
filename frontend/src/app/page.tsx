@@ -215,7 +215,14 @@ export default function Home() {
             nothing leaves this machine.
           </p>
         </div>
-        <ThemeToggle />
+        <div className="flex shrink-0 items-center gap-3">
+          <ThemeToggle />
+          <img
+            src="/app/parksons-logo.png"
+            alt="Parksons Packaging"
+            className="h-10 w-auto"
+          />
+        </div>
       </header>
 
       <div className="mx-auto max-w-6xl">
