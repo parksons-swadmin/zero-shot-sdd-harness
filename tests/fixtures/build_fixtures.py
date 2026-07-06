@@ -501,6 +501,80 @@ def build_summary(path: Path, as_of: date = AS_OF) -> dict:
     return expected
 
 
+# --------------------------------------------------------------------------- #
+# Synthetic STANDARD-PROFILE fixture (small, committable). Its headers match the
+# built-in DEFAULT MAPPING PROFILE in src/tools/header_detect.py EXACTLY, so
+# POST /api/preview returns auto_mapped=true and the frontend skips the
+# mapping-confirm screen straight to the dashboard. Two DECOY date columns
+# ("Billing Date", "AR Posting Dt") sit alongside "Base Line Date" to prove
+# invoice_date pins to the profile header rather than to a fuzzy-matching decoy.
+# NEVER derived from the confidential real AR export.
+# --------------------------------------------------------------------------- #
+STANDARD_COLUMNS: list[str] = [
+    "Payer Name",        # customer   (profile)
+    "Invoice No.",       # invoice_no (profile)
+    "Billing Date",      # DECOY date column — must NOT win invoice_date
+    "Base Line Date",    # invoice_date (profile pins here despite the decoys)
+    "Due Date",          # due_date   (profile)
+    "Amount Due",        # amount     (profile)
+    "Current Employee",  # employee   (profile)
+    "HoD Name",          # hod        (optional profile field)
+    "AR Posting Dt",     # DECOY date column
+]
+
+# ~8 clean rows dated relative to AS_OF (2026-01-15) — a mix of overdue and
+# current so the dashboard KPIs are non-trivial. Every row has a valid due date
+# and identity, so nothing is flagged/excluded and auto-map holds.
+STANDARD_ROWS: list[dict] = [
+    dict(customer="Acme Corp", invoice_no="INV-2001", base_line_date=_d(2025, 10, 1),
+         due_date=_d(2025, 11, 1), amount=500000.00, employee="Ravi Kumar", hod="Sunil Rao"),
+    dict(customer="Acme Corp", invoice_no="INV-2002", base_line_date=_d(2025, 12, 5),
+         due_date=_d(2026, 1, 5), amount=300000.00, employee="Ravi Kumar", hod="Sunil Rao"),
+    dict(customer="Beacon & Co", invoice_no="INV-2003", base_line_date=_d(2025, 8, 15),
+         due_date=_d(2025, 9, 15), amount=800000.00, employee="Priya Nair", hod="Meena Iyer"),
+    dict(customer="Beacon & Co", invoice_no="INV-2004", base_line_date=_d(2025, 12, 20),
+         due_date=_d(2026, 2, 1), amount=250000.00, employee="Priya Nair", hod="Meena Iyer"),
+    dict(customer="Zenith Ltd", invoice_no="INV-2005", base_line_date=_d(2025, 9, 20),
+         due_date=_d(2025, 10, 25), amount=450000.00, employee="Ravi Kumar", hod="Sunil Rao"),
+    dict(customer="Zenith Ltd", invoice_no="INV-2006", base_line_date=_d(2025, 11, 10),
+         due_date=_d(2025, 12, 15), amount=350000.00, employee="Priya Nair", hod="Meena Iyer"),
+    dict(customer="Nimbus Traders", invoice_no="INV-2007", base_line_date=_d(2025, 12, 5),
+         due_date=_d(2026, 1, 10), amount=200000.00, employee="Ravi Kumar", hod="Sunil Rao"),
+    dict(customer="Nimbus Traders", invoice_no="INV-2008", base_line_date=_d(2025, 7, 1),
+         due_date=_d(2025, 8, 1), amount=600000.00, employee="Priya Nair", hod="Meena Iyer"),
+]
+
+
+def build_standard(path: Path | None = None) -> Path:
+    """Write the small ``ar_standard.xlsx`` with the EXACT default-profile headers.
+
+    The decoy date columns are given deliberately DIFFERENT values from
+    "Base Line Date" so any regression that let a decoy win invoice_date would
+    change the computed dates — but a correct profile match pins invoice_date to
+    "Base Line Date".
+    """
+    path = path or (FIXTURE_DIR / "ar_standard.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Aging"
+    ws.append(STANDARD_COLUMNS)
+    for r in STANDARD_ROWS:
+        base = r["base_line_date"]
+        ws.append([
+            r["customer"],
+            r["invoice_no"],
+            base + timedelta(days=3),  # Billing Date decoy — deliberately != Base Line Date
+            base,                      # Base Line Date (invoice_date)
+            r["due_date"],
+            r["amount"],
+            r["employee"],
+            r["hod"],
+            base + timedelta(days=1),  # AR Posting Dt decoy
+        ])
+    wb.save(path)
+    return path
+
+
 def write_expected_json() -> Path:
     """(Re)write ``expected_small.json`` from the oracle WITHOUT touching the
     committed ``ar_small.xlsx`` binary (its rows are unchanged, so rewriting the
@@ -538,10 +612,20 @@ def main() -> None:
               f"top={expected['top_customers_by_overdue'][0]['customer']}")
         return
 
+    # --standard (re)generates ONLY the small standard-profile fixture used by the
+    # auto-skip E2E. Small and committable; the E2E global-setup also regenerates
+    # it on demand for a fresh checkout.
+    if "--standard" in sys.argv:
+        path = build_standard()
+        print(f"Wrote {path} ({len(STANDARD_ROWS)} rows, headers={STANDARD_COLUMNS})")
+        return
+
     json_only = "--json-only" in sys.argv
     if not json_only:
         build_small()
         print(f"Wrote {FIXTURE_DIR / 'ar_small.xlsx'}")
+        build_standard()
+        print(f"Wrote {FIXTURE_DIR / 'ar_standard.xlsx'}")
     out = write_expected_json()
     expected = compute_expected(SMALL_ROWS, AS_OF)
     print(f"Wrote {out}")

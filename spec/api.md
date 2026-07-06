@@ -14,7 +14,7 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 
 ### `POST /api/preview` — parse headers & propose mapping *(Phase 1)*
 
-**Purpose:** Read the uploaded `.xlsx`, list sheets/columns, auto-detect the six canonical fields, return a 10-row preview and parse-time data-quality flags. Server keeps nothing.
+**Purpose:** Read the uploaded `.xlsx`, list sheets/columns, auto-detect the six canonical fields (**preferring a built-in default mapping profile** over fuzzy matching), signal whether the whole file was confidently recognized (`auto_mapped`), and return a 10-row preview and parse-time data-quality flags. Server keeps nothing.
 
 **Request:** `multipart/form-data`
 | Part | Type | Required |
@@ -38,11 +38,14 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
     {"field": "hod",          "matched_column": "HoD Name",            "confidence": 70, "status": "low"}
   ],
   "preview_rows": [{"Cust Name": "Acme Corp", "Invoice #": "INV-1", "...": "..."}],
-  "parse_flags": [{"row_index": 7, "field": "due_date", "reason": "missing", "raw_value": ""}]
+  "parse_flags": [{"row_index": 7, "field": "due_date", "reason": "missing", "raw_value": ""}],
+  "auto_mapped": false
 }
 ```
 
 > `proposed_mapping` MAY include an optional 7th `hod` (Head-of-Department) entry, auto-detected from headers like "HoD Name"; it is **optional and low-confidence is fine** — it is never one of the six required fields and never blocks Confirm. Omitted when no plausible HoD column is found.
+
+> **`auto_mapped` *(Phase 3.1)*.** `true` only when **all six required fields** are resolved by the **built-in default mapping profile** to **distinct** columns present in the sheet at `status=high`, with no duplicate columns (a purely-fuzzy match, without the profile headers, does **not** trigger auto-skip); the optional `hod` **never** affects it. When `true`, the frontend **skips the mapping-confirmation screen** and goes straight to compute/dashboard (with a dismissible review affordance); when `false`, it shows the confirmation screen as today. Detection **prefers** the default mapping profile: a profile source header present in the sheet (matched exact, case/whitespace-insensitive) pins its field at high confidence over any fuzzy candidate (e.g. `invoice_date` → `Base Line Date` even when other date columns exist). See [capabilities/xlsx_ingestion_and_mapping.md](capabilities/xlsx_ingestion_and_mapping.md) for the profile table and [ui.md](ui.md) for the flow.
 
 **Error cases:**
 | Status | Condition |

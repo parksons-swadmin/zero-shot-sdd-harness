@@ -56,3 +56,8 @@ class PreviewResult(BaseModel):
     proposed_mapping: list[FieldMatch]
     preview_rows: list[dict]
     parse_flags: list[QualityFlag]
+    # Additive signal: when True, all six required fields were resolved to
+    # distinct high-confidence columns (a recognized standard export), so the
+    # client may skip the mapping-confirm screen. Defaults False for every sheet
+    # that does not fully auto-resolve — preserving the existing confirm flow.
+    auto_mapped: bool = False

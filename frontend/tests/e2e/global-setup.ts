@@ -7,12 +7,34 @@ import path from 'path'
 const REPO_ROOT = path.resolve(__dirname, '../../..')
 const FIXTURE_DIR = path.join(REPO_ROOT, 'tests', 'fixtures')
 const LARGE = path.join(FIXTURE_DIR, 'ar_large.xlsx')
+const STANDARD = path.join(FIXTURE_DIR, 'ar_standard.xlsx')
 
-function present(): boolean {
+function present(file: string = LARGE): boolean {
   try {
-    return fs.statSync(LARGE).size > 0
+    return fs.statSync(file).size > 0
   } catch {
     return false
+  }
+}
+
+/**
+ * Ensures the small standard-profile `ar_standard.xlsx` fixture exists before the
+ * auto-skip E2E. It is small (committable), but we (re)generate it on demand so a
+ * fresh checkout that lacks it still runs. Deterministic builder — never touches
+ * the confidential real AR export.
+ */
+function ensureStandard(): void {
+  if (present(STANDARD)) return
+  console.log('[global-setup] tests/fixtures/ar_standard.xlsx missing — generating…')
+  execSync('uv run python tests/fixtures/build_fixtures.py --standard', {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+  })
+  if (!present(STANDARD)) {
+    throw new Error(
+      'ar_standard.xlsx could not be generated. Build it manually: ' +
+        'uv run python tests/fixtures/build_fixtures.py --standard',
+    )
   }
 }
 
@@ -24,6 +46,8 @@ function present(): boolean {
  * committed ar_small.xlsx.
  */
 export default function globalSetup(): void {
+  ensureStandard()
+
   if (present()) return
 
   console.log('[global-setup] tests/fixtures/ar_large.xlsx missing — generating (>=60k rows)…')

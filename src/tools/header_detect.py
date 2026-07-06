@@ -40,7 +40,63 @@ CANONICAL_FIELDS: list[str] = list(SYNONYM_SEEDS.keys())
 # high score, so this keeps the standard 60 cutoff clean.
 HOD_SYNONYM_SEEDS: list[str] = ["hod", "head of department", "department head", "reporting manager"]
 
+# Built-in DEFAULT MAPPING PROFILE — a stateless preset (no persistence) of the
+# canonical field -> exact expected source header for a recognized standard
+# export. When these EXACT headers are present in a sheet (matched case- and
+# whitespace-insensitively), the profile assignment takes PRECEDENCE over fuzzy
+# matching, so a recognized export can skip the mapping-confirm screen. This is
+# critical for ``invoice_date`` -> "Base Line Date": in the standard export
+# other date columns ("Billing Date" / "AR Posting Dt") would out-score it under
+# pure fuzzy matching, so the exact-profile match must win. The optional 7th
+# ``hod`` field is resolved the same way but never affects the six-field gate.
+DEFAULT_MAPPING_PROFILE: dict[str, str] = {
+    "customer": "Payer Name",
+    "invoice_no": "Invoice No.",
+    "invoice_date": "Base Line Date",
+    "due_date": "Due Date",
+    "amount": "Amount Due",
+    "employee": "Current Employee",
+}
+DEFAULT_MAPPING_PROFILE_HOD: str = "HoD Name"
+
+# Confidence assigned to an exact default-profile header match (a deterministic
+# ceiling, always at/above any fuzzy threshold -> always "high").
+_PROFILE_CONFIDENCE = 100
+
 _LOW_CUTOFF = 60  # score < this -> unmatched
+
+
+def _norm_header(header: str) -> str:
+    """Case- and whitespace-insensitive header key.
+
+    Lower-cases and collapses any run of whitespace to a single space (and trims
+    ends), so "Base Line Date", "base line date", and " Base   Line  Date " all
+    match the same profile header while the ACTUAL sheet column string is what we
+    return to the caller.
+    """
+    return " ".join(str(header).split()).lower()
+
+
+def _resolve_profile(columns: list[str]) -> dict[str, str]:
+    """Resolve the DEFAULT MAPPING PROFILE (incl. optional ``hod``) against a
+    sheet's actual columns, case- and whitespace-insensitively.
+
+    Returns ``{field: actual column string from the sheet}`` for every profile
+    field whose exact header is present. Fields with no profile header in the
+    sheet are absent from the result (they fall back to fuzzy detection). The
+    ACTUAL column string from the sheet is preserved verbatim.
+    """
+    by_norm: dict[str, str] = {}
+    for col in columns:
+        by_norm.setdefault(_norm_header(col), col)  # first occurrence wins
+
+    resolved: dict[str, str] = {}
+    profile = {**DEFAULT_MAPPING_PROFILE, "hod": DEFAULT_MAPPING_PROFILE_HOD}
+    for field, expected in profile.items():
+        actual = by_norm.get(_norm_header(expected))
+        if actual is not None:
+            resolved[field] = actual
+    return resolved
 
 
 def _best_against(header: str, seeds: list[str]) -> int:
@@ -68,7 +124,21 @@ def detect_mapping(columns: list[str]) -> list[FieldMatch]:
     threshold = get_settings().header_match_threshold
     matches: list[FieldMatch] = []
 
+    # Exact default-profile matches take PRECEDENCE over fuzzy detection.
+    profile = _resolve_profile(columns)
+
     for field in CANONICAL_FIELDS:
+        if field in profile:
+            matches.append(
+                FieldMatch(
+                    field=field,
+                    matched_column=profile[field],
+                    confidence=_PROFILE_CONFIDENCE,
+                    status="high",
+                )
+            )
+            continue
+
         best_col: str | None = None
         best_score = -1
         for col in columns:
@@ -90,11 +160,54 @@ def detect_mapping(columns: list[str]) -> list[FieldMatch]:
                 FieldMatch(field=field, matched_column=best_col, confidence=best_score, status="low")
             )
 
-    hod_match = _detect_hod(columns, threshold)
-    if hod_match is not None:
-        matches.append(hod_match)
+    # Optional hod: an exact profile ("HoD Name") match wins; otherwise fall back
+    # to fuzzy detection (emitted only when a plausible column exists).
+    if "hod" in profile:
+        matches.append(
+            FieldMatch(
+                field="hod",
+                matched_column=profile["hod"],
+                confidence=_PROFILE_CONFIDENCE,
+                status="high",
+            )
+        )
+    else:
+        hod_match = _detect_hod(columns, threshold)
+        if hod_match is not None:
+            matches.append(hod_match)
 
     return matches
+
+
+def compute_auto_mapped(matches: list[FieldMatch], columns: list[str]) -> bool:
+    """True when the sheet is a recognized standard export needing no confirm.
+
+    Fires only when the built-in DEFAULT MAPPING PROFILE resolves ALL SIX
+    required canonical fields to DISTINCT columns present in the sheet, each at
+    ``high`` status (with no duplicate column across the six). Gating on the
+    profile — not merely on fuzzy ``high`` status — is what keeps the back-compat
+    guarantee: a sheet WITHOUT the profile headers behaves exactly as before
+    (``auto_mapped=False``, confirm screen), even if fuzzy happens to score all
+    six high. The optional ``hod`` field never affects this.
+    """
+    profile = _resolve_profile(columns)
+    if not all(field in profile for field in CANONICAL_FIELDS):
+        return False
+
+    # Profile coverage already guarantees six distinct present columns; verify
+    # the emitted matches uphold req-3's high/distinct/no-duplicate invariant.
+    available = set(columns)
+    by_field = {m.field: m for m in matches}
+    seen: set[str] = set()
+    for field in CANONICAL_FIELDS:
+        m = by_field.get(field)
+        if m is None or m.status != "high" or m.matched_column is None:
+            return False
+        if m.matched_column not in available or m.matched_column in seen:
+            return False
+        seen.add(m.matched_column)
+
+    return len(seen) == len(CANONICAL_FIELDS)
 
 
 def _detect_hod(columns: list[str], threshold: int) -> FieldMatch | None:

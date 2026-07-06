@@ -12,7 +12,7 @@ A single, discrete behaviour of the dashboard — e.g. "compute the exact aging 
 
 | Capability | Phase | File |
 |-----------|-------|------|
-| XLSX Ingestion & Column Mapping | 1 | [xlsx_ingestion_and_mapping.md](xlsx_ingestion_and_mapping.md) |
+| XLSX Ingestion & Column Mapping | 1 (+3.1: default profile + auto-skip) | [xlsx_ingestion_and_mapping.md](xlsx_ingestion_and_mapping.md) |
 | Aging Metrics Engine (exact, deterministic) | 1 | [aging_metrics_engine.md](aging_metrics_engine.md) |
 | Headline Dashboard (KPIs + Top-20 chart) | 1 | [headline_dashboard.md](headline_dashboard.md) |
 | Employee-wise Summary | 2 | [employee_summary.md](employee_summary.md) |

@@ -22,7 +22,7 @@ from graph.agent import agentic_ai
 from graph.state import AnalysisState
 from observability.events import get_logger
 from tools.flags import compute_risk_flags
-from tools.header_detect import CANONICAL_FIELDS, detect_mapping
+from tools.header_detect import CANONICAL_FIELDS, compute_auto_mapped, detect_mapping
 from tools.ingest import normalize, read_workbook
 from tools.metrics import build_data_quality_report, compute_metrics
 from tools.validate import validate
@@ -99,6 +99,7 @@ def build_preview(*, file_bytes: bytes, sheet_name: str | None = None) -> Previe
     chosen = sheet_name if sheet_name else sheets[0]
     columns = [str(c) for c in df.columns]
     proposed = detect_mapping(columns)
+    auto_mapped = compute_auto_mapped(proposed, columns)
 
     preview_rows = [
         {str(col): _json_safe(val) for col, val in row.items()}
@@ -112,7 +113,14 @@ def build_preview(*, file_bytes: bytes, sheet_name: str | None = None) -> Previe
         normalized = normalize(df, mapping, date.today())
         parse_flags = validate(normalized)
 
-    _log.info("preview.built", sheet=chosen, columns=len(columns), rows=len(df), flags=len(parse_flags))
+    _log.info(
+        "preview.built",
+        sheet=chosen,
+        columns=len(columns),
+        rows=len(df),
+        flags=len(parse_flags),
+        auto_mapped=auto_mapped,
+    )
     return PreviewResult(
         sheets=sheets,
         sheet_name=chosen,
@@ -120,6 +128,7 @@ def build_preview(*, file_bytes: bytes, sheet_name: str | None = None) -> Previe
         proposed_mapping=proposed,
         preview_rows=preview_rows,
         parse_flags=parse_flags,
+        auto_mapped=auto_mapped,
     )
 
 

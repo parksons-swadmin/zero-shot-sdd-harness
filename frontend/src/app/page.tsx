@@ -45,24 +45,83 @@ export default function Home() {
   const [progress, setProgress] = useState<ComputeProgress | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [computeError, setComputeError] = useState<string | null>(null)
+  // True when the mapping was auto-applied (a recognized standard export) and we
+  // skipped the confirm screen — drives the dismissible dashboard banner.
+  const [autoMapped, setAutoMapped] = useState(false)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
 
-  const runPreview = useCallback(async (f: File, sheet?: string) => {
-    setPreviewing(true)
-    setUploadError(null)
-    setComputeError(null)
-    try {
-      const data = await postPreview(f, sheet)
-      setPreview(data)
-      setSheetName(data.sheet_name)
-      setMapping(buildMapping(data))
-      setStep('mapping')
-    } catch (e) {
-      setUploadError(e instanceof Error ? e.message : 'Could not read the workbook.')
-      setStep('upload')
-    } finally {
-      setPreviewing(false)
-    }
-  }, [])
+  // Run compute for an EXPLICIT mapping (never the closed-over state), so the
+  // auto-skip path can compute the freshly-built mapping without waiting for a
+  // React state flush. Returns true when the dashboard rendered, false on error
+  // (computeError is set, and the caller decides where to land).
+  const runCompute = useCallback(
+    async (f: File, m: Mapping, sheet: string): Promise<boolean> => {
+      setComputing(true)
+      setComputeError(null)
+      // Show the progress bar immediately; the streamed frames fill in real row counts.
+      setProgress({ phase: 'starting', rows_done: 0, rows_total: 0 })
+      try {
+        let data: DashboardResult
+        try {
+          // Preferred path: SSE stream with live progress for large files.
+          data = await computeStream(f, m, sheet, (p) => setProgress(p))
+        } catch {
+          // Stream unavailable / failed for any reason → fall back to the plain
+          // non-streaming compute so the dashboard still renders (no progress bar).
+          data = await postCompute(f, m, sheet)
+        }
+        setResult(data)
+        setStep('dashboard')
+        return true
+      } catch (e) {
+        setComputeError(e instanceof Error ? e.message : 'Could not compute the metrics.')
+        return false
+      } finally {
+        setComputing(false)
+        setProgress(null)
+      }
+    },
+    [],
+  )
+
+  const runPreview = useCallback(
+    async (f: File, sheet?: string) => {
+      setPreviewing(true)
+      setUploadError(null)
+      setComputeError(null)
+      try {
+        const data = await postPreview(f, sheet)
+        setPreview(data)
+        setSheetName(data.sheet_name)
+        // Build the mapping from proposed_mapping (INCLUDING the optional hod when
+        // present) so the auto-skip compute — and the pre-filled confirm screen —
+        // both carry every detected column.
+        const m = buildMapping(data)
+        setMapping(m)
+        if (data.auto_mapped) {
+          // Recognized standard export → skip the confirm screen and compute now.
+          setAutoMapped(true)
+          setBannerDismissed(false)
+          const ok = await runCompute(f, m, data.sheet_name)
+          if (!ok) {
+            // Compute failed — fall back to the confirm screen (pre-filled) so the
+            // user can adjust the mapping and retry; the error shows there.
+            setStep('mapping')
+          }
+        } else {
+          // Low-confidence / non-standard export → confirm screen, exactly as before.
+          setAutoMapped(false)
+          setStep('mapping')
+        }
+      } catch (e) {
+        setUploadError(e instanceof Error ? e.message : 'Could not read the workbook.')
+        setStep('upload')
+      } finally {
+        setPreviewing(false)
+      }
+    },
+    [runCompute],
+  )
 
   const onFileSelected = useCallback(
     (f: File) => {
@@ -87,29 +146,19 @@ export default function Home() {
 
   const onConfirm = useCallback(async () => {
     if (!file) return
-    setComputing(true)
+    const ok = await runCompute(file, mapping, sheetName)
+    // The user manually reviewed & confirmed the mapping — it is no longer an
+    // untouched auto-map, so retire the auto-mapped banner.
+    if (ok) setAutoMapped(false)
+  }, [file, mapping, sheetName, runCompute])
+
+  // Banner action: reopen the confirm screen PRE-FILLED with the current mapping.
+  const onReviewMapping = useCallback(() => {
     setComputeError(null)
-    // Show the progress bar immediately; the streamed frames fill in real row counts.
-    setProgress({ phase: 'starting', rows_done: 0, rows_total: 0 })
-    try {
-      let data: DashboardResult
-      try {
-        // Preferred path: SSE stream with live progress for large files.
-        data = await computeStream(file, mapping, sheetName, (p) => setProgress(p))
-      } catch {
-        // Stream unavailable / failed for any reason → fall back to the plain
-        // non-streaming compute so the dashboard still renders (no progress bar).
-        data = await postCompute(file, mapping, sheetName)
-      }
-      setResult(data)
-      setStep('dashboard')
-    } catch (e) {
-      setComputeError(e instanceof Error ? e.message : 'Could not compute the metrics.')
-    } finally {
-      setComputing(false)
-      setProgress(null)
-    }
-  }, [file, mapping, sheetName])
+    setStep('mapping')
+  }, [])
+
+  const onDismissBanner = useCallback(() => setBannerDismissed(true), [])
 
   const startOver = useCallback(() => {
     setStep('upload')
@@ -123,6 +172,8 @@ export default function Home() {
     setPreviewing(false)
     setComputing(false)
     setProgress(null)
+    setAutoMapped(false)
+    setBannerDismissed(false)
   }, [])
 
   return (
@@ -191,6 +242,37 @@ export default function Home() {
                 </button>
               </div>
             </div>
+
+            {autoMapped && !bannerDismissed && (
+              <div
+                data-testid="auto-mapped-banner"
+                role="status"
+                className="no-print flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"
+              >
+                <span className="flex items-center gap-2">
+                  <span aria-hidden="true">ℹ</span>
+                  Columns auto-mapped from your standard format.
+                </span>
+                <span className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onReviewMapping}
+                    data-testid="review-mapping"
+                    className="font-medium underline underline-offset-2 hover:text-blue-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  >
+                    Review / change mapping
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDismissBanner}
+                    aria-label="Dismiss auto-mapped notice"
+                    className="rounded p-1 leading-none text-blue-500 hover:bg-blue-100 hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </span>
+              </div>
+            )}
 
             <KpiTiles result={result} />
 

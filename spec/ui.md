@@ -6,7 +6,7 @@
 
 ## UI Type
 
-Web dashboard (single-page flow): **Upload → Mapping-confirm → Dashboard**. No login, no navigation menu — one focused flow.
+Web dashboard (single-page flow): **Upload → Mapping-confirm → Dashboard**, where **Mapping-confirm is auto-skipped** when the columns are confidently recognized (see the Auto-skip flow below). No login, no navigation menu — one focused flow.
 
 ---
 
@@ -26,6 +26,7 @@ Every monetary value renders via `Intl.NumberFormat('en-IN', { style: 'currency'
 
 ### Screen: Mapping Confirmation *(Phase 1 — real)*
 **Purpose:** the user confirms/corrects the six-field mapping before compute (the human-in-the-loop checkpoint).
+**When shown:** whenever the preview response returns `auto_mapped=false` (columns not confidently recognized, a low/unmatched field, or a duplicate collision). When `auto_mapped=true` this screen is **skipped** and the app goes straight to compute → Dashboard (see the Auto-skip flow below). *(Auto-skip is a Phase 3.1 enhancement; in earlier phases this screen is always shown.)*
 **Key elements:**
 - One row per canonical field (customer, invoice_no, invoice_date, due_date, amount, employee) with a dropdown of source columns, pre-selected to the detected match.
 - Confidence badge per field: green check (`high`), amber "please confirm" (`low`), red "select a column" (`unmatched`).
@@ -35,6 +36,10 @@ Every monetary value renders via `Intl.NumberFormat('en-IN', { style: 'currency'
 **Actions:** correct any dropdown; **Confirm & Compute** (disabled until all six fields are mapped and no duplicate column is selected) → `POST /api/compute`.
 **States:** populated (pre-filled mapping); low-confidence highlighted; error (compute failure).
 
+### Flow: Auto-skip mapping *(Phase 3.1 enhancement — see [roadmap.md](roadmap.md))*
+When `POST /api/preview` returns `auto_mapped=true` (all six required fields resolved by the built-in default mapping profile as distinct high-confidence columns; see [api.md](api.md) and [capabilities/xlsx_ingestion_and_mapping.md](capabilities/xlsx_ingestion_and_mapping.md)), the app **skips the Mapping Confirmation screen entirely** and proceeds straight to compute → Dashboard. On the Dashboard it shows a **dismissible review affordance**: a compact, non-blocking banner reading **"Columns auto-mapped from your standard format — Review / change mapping"** whose **Review / change mapping** action reopens the (pre-filled) Mapping Confirmation screen so the user can override and re-compute. Dismissing the banner hides it for the session; it is informational, never an error.
+When `auto_mapped=false`, nothing changes: the Mapping Confirmation screen is shown as today. **Stateless** — no preference is stored; the decision is recomputed on every upload.
+
 ### Screen: Dashboard *(Phase 1 real for the headline; later surfaces are labelled stubs)*
 **Purpose:** show the computed AR aging picture.
 
@@ -42,6 +47,7 @@ Every monetary value renders via `Intl.NumberFormat('en-IN', { style: 'currency'
 - **KPI tiles:** Total outstanding · Total overdue · % overdue · Customer count · Worst aging bucket.
 - **Top-20 customers by overdue** — horizontal bar chart (Recharts), descending, ₹ tooltips. *The headline.*
 - Source filename + `as_of` date + row count header.
+- *(Phase 3.1)* When mapping was auto-skipped, a dismissible "Columns auto-mapped from your standard format — Review / change mapping" banner (see the Auto-skip flow above).
 
 **Phase 1 — LABELLED NON-FUNCTIONAL STUBS** (visible so the user sees the vision; each clearly tagged "Coming in Phase 2/3", not interactive in a way that looks broken):
 - Employee-wise summary table *(Phase 2)*

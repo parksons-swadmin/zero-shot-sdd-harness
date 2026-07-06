@@ -51,6 +51,14 @@ export interface PreviewData {
   proposed_mapping: FieldMatch[]
   preview_rows: Record<string, unknown>[]
   parse_flags: ParseFlag[]
+  /**
+   * Additive signal (Wave 1 backend): true when all six required fields resolved
+   * to distinct high-confidence columns via the built-in default mapping profile —
+   * i.e. a recognized standard export. When true the client MAY skip the
+   * mapping-confirm screen and compute straight away; when false, behave exactly
+   * as before (show the confirm screen).
+   */
+  auto_mapped: boolean
 }
 
 export type Bucket = '0-30' | '31-60' | '61-90' | '90+' | 'none'
