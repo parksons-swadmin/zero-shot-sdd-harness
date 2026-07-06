@@ -1,10 +1,10 @@
 'use client'
 
 // Light/Dark theme state. A UI PREFERENCE only (never business data) — persisted in
-// localStorage so an explicit choice survives a reload, defaulting to the OS
-// `prefers-color-scheme` when the user has not chosen. The `.dark` class on <html>
-// is the single source of truth Tailwind's class dark-mode variant keys off; the
-// pre-paint <script> in layout.tsx sets it before first paint to avoid a flash.
+// localStorage so an explicit choice survives a reload, defaulting to DARK when the
+// user has not chosen. The `.dark` class on <html> is the single source of truth
+// Tailwind's class dark-mode variant keys off; the pre-paint <script> in layout.tsx
+// sets it before first paint to avoid a flash.
 
 import { useCallback, useEffect, useState } from 'react'
 
@@ -12,11 +12,6 @@ export type Theme = 'light' | 'dark'
 
 // Must match the key read by the inline pre-paint script in layout.tsx.
 export const THEME_STORAGE_KEY = 'ar-theme'
-
-export function getSystemTheme(): Theme {
-  if (typeof window === 'undefined' || !window.matchMedia) return 'light'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
 
 export function getStoredTheme(): Theme | null {
   if (typeof window === 'undefined') return null
@@ -36,32 +31,19 @@ export function applyTheme(theme: Theme): void {
 }
 
 /**
- * Toggle-button state. Resolves stored-override-wins-else-system on mount, follows
- * live OS changes only while the user has made no explicit choice, and persists an
+ * Toggle-button state. Resolves stored-override-else-DARK on mount and persists an
  * explicit pick. Initial state is 'light' so the first client render matches the
  * static build output (no hydration mismatch); the pre-paint script has already set
- * the real class, so there is no visual flash.
+ * the real class (dark by default), so there is no visual flash.
  */
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>('light')
 
   useEffect(() => {
-    const resolved = getStoredTheme() ?? getSystemTheme()
+    // Default to DARK when the user has not made an explicit choice.
+    const resolved = getStoredTheme() ?? 'dark'
     setThemeState(resolved)
     applyTheme(resolved)
-
-    if (!window.matchMedia) return
-    const mql = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => {
-      // Only auto-follow the OS when the user has NOT pinned a preference.
-      if (getStoredTheme() === null) {
-        const sys = getSystemTheme()
-        setThemeState(sys)
-        applyTheme(sys)
-      }
-    }
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
   }, [])
 
   const setTheme = useCallback((next: Theme) => {

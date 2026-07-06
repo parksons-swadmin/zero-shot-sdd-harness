@@ -31,6 +31,7 @@ from graph.runner import (
     build_preview,
     run_analysis,
     run_analysis_streaming,
+    run_invoices,
 )
 from observability.events import get_logger
 from tools.excel_export import build_workbook
@@ -118,6 +119,54 @@ async def compute(
         row_count=metrics.row_count,
     )
     return ok(result)
+
+
+@router.post("/invoices")
+async def invoices(
+    file: UploadFile = File(...),
+    sheet_name: str | None = Form(None),
+    mapping: str = Form(...),
+    customer: str | None = Form(None),
+    employee: str | None = Form(None),
+) -> dict:
+    """Invoice-level drill-down behind the dashboard, optionally filtered.
+
+    Reuses the exact ``/api/compute`` pipeline (canonical normalize + embedded
+    summary-row exclusion + aging/dpd/bucket + ``as_of`` resolution), so the
+    subtotal ties out to the dashboard totals. Optional ``customer`` / ``employee``
+    filters (exact match, ANDed) scope the list; an unfiltered list is capped
+    (``truncated=True``) while ``total_count`` / ``subtotal_amount`` still cover
+    the full set. Same clean errors as ``/api/compute`` (bad file / bad mapping)."""
+    file_bytes = await file.read()
+    _enforce_upload_size(file_bytes)
+    column_mapping = _parse_mapping(mapping)
+
+    try:
+        result = run_invoices(
+            file_bytes=file_bytes,
+            sheet_name=sheet_name,
+            mapping=column_mapping,
+            customer=customer,
+            employee=employee,
+        )
+    except PipelineError as exc:
+        raise api_error(exc.code, exc.message, exc.status)
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 - never leak a traceback to the client
+        raise api_error("INTERNAL", "Unexpected error while listing invoices.", 500)
+
+    # Aggregate counts only — never customer names or file contents in logs.
+    _log.info(
+        "api.invoices",
+        filename=file.filename,
+        size_bytes=len(file_bytes),
+        total_count=result.total_count,
+        returned=len(result.invoices),
+        truncated=result.truncated,
+        filtered=bool((customer or "").strip() or (employee or "").strip()),
+    )
+    return ok(result.model_dump(mode="json"))
 
 
 # NOTE: the roadmap labels this "GET /api/export/xlsx", but the server is

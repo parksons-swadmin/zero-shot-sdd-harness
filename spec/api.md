@@ -115,6 +115,55 @@ The `employees`, `customer_breakdown`, `employee_breakdown`, `risk_flags`, and `
 Excel export is generated server-side from the same `DashboardResult` (see [excel_export.md](capabilities/excel_export.md)). It is a **POST** (not GET) because — the server being stateless — the file bytes + confirmed mapping are re-sent in the request body, which a GET cannot carry. PDF is produced client-side via `window.print()` (see [pdf_export.md](capabilities/pdf_export.md)); no server PDF endpoint is required — the `/api/export/pdf` slot is reserved and may be dropped if the client-side approach fully covers it.
 > **Assumed:** PDF is client-side only; the server exposes no PDF endpoint.
 
+### `POST /api/invoices` — invoice-level drill-down *(Phase 4)*
+
+**Purpose:** Return the individual invoice rows behind the aggregates for the current filter, plus the filtered subtotal and count. Same stateless two-input model as `/api/compute` (file + confirmed mapping re-sent), with optional `customer` and `employee` filters. Pure function of its inputs; nothing persisted. No LLM. See [capabilities/invoice_drilldown.md](capabilities/invoice_drilldown.md).
+
+**Request:** `multipart/form-data`
+| Part | Type | Required |
+|------|------|----------|
+| file | `.xlsx` file (re-sent) | yes |
+| sheet_name | string | no |
+| mapping | JSON string — same shape as `/api/compute` (`{customer, invoice_no, invoice_date, due_date, amount, employee}` all required, optional `hod`) | yes |
+| customer | string — exact customer name to filter to | no |
+| employee | string — exact employee name to filter to (incl. `"(blank)"`) | no |
+
+Filters combine with **AND**; omitting both is the unfiltered view. There are **no** sort parameters — column sorting is a client-side concern over the returned rows (see below).
+
+**Response `data` (`DrilldownResult`):**
+```json
+{
+  "invoices": [
+    {
+      "customer": "Beacon & Co",
+      "invoice_no": "INV-1007",
+      "amount": 312500.00,
+      "due_date": "2025-09-18",
+      "days_overdue": 119,
+      "bucket": "90+",
+      "employee": "Ravi"
+    }
+  ],
+  "total_count": 12,
+  "subtotal_amount": 3750000.00,
+  "truncated": false
+}
+```
+
+- **`invoices`** — one object per invoice row for the current filter. `amount` = ₹ rupee number rounded from exact integer paise (2dp). `due_date` = ISO `YYYY-MM-DD` **or `null`**. `days_overdue` = int **or `null`** (`> 0` overdue, `<= 0` current, `null` when due date missing). `bucket` ∈ `current`/`0-30`/`31-60`/`61-90`/`90+`/`unclassified`.
+- **`total_count`** / **`subtotal_amount`** — the invoice count and total amount due for the **full** filtered set (computed over exact integer paise), **not** over the possibly-capped `invoices` page. `subtotal_amount` is a ₹ number rounded from exact paise.
+- **`truncated`** — `true` when `total_count > len(invoices)`.
+
+> **Summary/total rows excluded, genuine rows included.** The drill-down lists the same normalized `Invoice` rows the metrics engine uses: embedded summary / total rows are excluded ([rule](capabilities/xlsx_ingestion_and_mapping.md#summary--total-row-detection--exclusion)); negative credit notes, zero amounts, blank-employee rows, and missing-due-date rows (`bucket="unclassified"`) are all **included**.
+
+> **Render cap & truncation.** The endpoint caps `invoices` at `AGENT_DRILLDOWN_MAX_ROWS` (default 1000; see [architecture.md](architecture.md) Settings). When a filter is applied the matching set is virtually always within the cap (full set returned, `truncated=false`). An unfiltered/broad view over a large file is capped (`truncated=true`) but **`total_count` and `subtotal_amount` still reflect the full filtered set** — the capped page never distorts the totals. Capped rows are chosen by a deterministic default sort (`days_overdue` desc, `unclassified` last; ties → `amount` desc, then `invoice_no` asc, then `row_index` asc); the UI prompts the user to filter when `truncated=true`.
+
+**Reference date:** same as `/api/compute` — `date.today()` unless `AGENT_AS_OF` is set. No per-request `as_of`.
+
+**Error cases:** same structural error set as `/api/compute` (400 bad/incomplete/duplicate mapping or non-`.xlsx`; 413 oversized; 422 uncoercible required column or row cap; 500 unexpected — rendered `error`, never a raw traceback). A `customer`/`employee` filter that matches **no** rows is **not** an error — it returns `200` with `invoices=[]`, `total_count=0`, `subtotal_amount=0.0`, `truncated=false`.
+
+---
+
 ### `GET /health` *(existing)* — liveness check, unchanged.
 
 ---

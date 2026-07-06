@@ -21,6 +21,7 @@ A single, discrete behaviour of the dashboard — e.g. "compute the exact aging 
 | Excel Export (multi-sheet .xlsx) | 3 | [excel_export.md](excel_export.md) |
 | Print-ready PDF Export | 3 | [pdf_export.md](pdf_export.md) |
 | Large-file Progress Feedback | 3 | [large_file_progress.md](large_file_progress.md) |
+| Invoice Drill-down (row-level view + filters) | 4 | [invoice_drilldown.md](invoice_drilldown.md) |
 
 ## Explicitly NOT a Capability (out of scope)
 

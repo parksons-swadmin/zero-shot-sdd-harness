@@ -142,6 +142,35 @@ export interface DashboardResult {
 }
 
 /**
+ * One invoice-level row behind the dashboard (drill-down list from POST /api/invoices).
+ * Money is a rupee number; negative amounts are credit notes and are kept.
+ * `invoice_no`, `due_date` (ISO), and `days_overdue` are null when the source row lacks
+ * them; `bucket` is the row's aging-bucket string (keyed by BUCKET_LABELS).
+ */
+export interface InvoiceRow {
+  customer: string
+  invoice_no: string | null
+  amount: number
+  due_date: string | null
+  days_overdue: number | null
+  bucket: string
+  employee: string
+}
+
+/**
+ * Response `data` from POST /api/invoices — the invoice drill-down list.
+ * A filtered request (customer and/or employee) returns ALL matching rows with
+ * `truncated=false`; an unfiltered request caps `invoices` (default 1000) and sets
+ * `truncated=true`, while `total_count` / `subtotal_amount` still cover the FULL set.
+ */
+export interface InvoiceListData {
+  invoices: InvoiceRow[]
+  total_count: number
+  subtotal_amount: number
+  truncated: boolean
+}
+
+/**
  * Live progress emitted by POST /api/compute/stream while a (large) file is parsed
  * and aggregated. `rows_total` is the true row count; `rows_done` climbs toward it.
  */

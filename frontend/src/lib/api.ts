@@ -2,7 +2,13 @@
 // Success bodies are `{ data, error: null }`; non-2xx bodies are `{ detail: { code, message } }`.
 // These helpers unwrap `data` on success and throw a human Error otherwise.
 
-import type { ComputeProgress, DashboardResult, Mapping, PreviewData } from './types'
+import type {
+  ComputeProgress,
+  DashboardResult,
+  InvoiceListData,
+  Mapping,
+  PreviewData,
+} from './types'
 
 const NETWORK_ERROR = 'Could not reach the server. Is it running at http://localhost:8001 ?'
 
@@ -70,6 +76,39 @@ export async function postCompute(
   if (!res.ok) throw new Error(await readError(res, 'Could not compute the metrics'))
   const body = await res.json()
   return body.data as DashboardResult
+}
+
+/**
+ * POST /api/invoices — invoice-level drill-down behind the dashboard, optionally
+ * filtered by an exact `customer` and/or `employee` (ANDed). Re-posts the file +
+ * confirmed mapping as the SAME multipart body as /api/compute (incl. the optional
+ * `hod`), plus the filter fields when set. Blank filter values are simply omitted.
+ *
+ * A filtered list returns ALL matching rows (`truncated=false`); an unfiltered list
+ * is capped server-side (`truncated=true`) while `total_count` / `subtotal_amount`
+ * still cover the full set. Unwraps `data` on success; throws a human Error otherwise.
+ */
+export async function postInvoices(
+  file: File,
+  mapping: Mapping,
+  sheetName: string | undefined,
+  filters: { customer?: string; employee?: string } = {},
+): Promise<InvoiceListData> {
+  const fd = computeFormData(file, mapping, sheetName)
+  const customer = filters.customer?.trim()
+  const employee = filters.employee?.trim()
+  if (customer) fd.append('customer', customer)
+  if (employee) fd.append('employee', employee)
+
+  let res: Response
+  try {
+    res = await fetch('/api/invoices', { method: 'POST', body: fd })
+  } catch {
+    throw new Error(NETWORK_ERROR)
+  }
+  if (!res.ok) throw new Error(await readError(res, 'Could not load the invoice list'))
+  const body = await res.json()
+  return body.data as InvoiceListData
 }
 
 // --------------------------------------------------------------------------- //

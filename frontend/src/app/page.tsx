@@ -7,6 +7,7 @@ import KpiTiles from './components/KpiTiles'
 import TopCustomersChart from './components/TopCustomersChart'
 import EmployeeTable from './components/EmployeeTable'
 import AgingBreakdown from './components/AgingBreakdown'
+import Drilldown from './components/Drilldown'
 import FlagsPanel from './components/FlagsPanel'
 import ExportBar from './components/ExportBar'
 import ProgressBar from './components/ProgressBar'
@@ -50,6 +51,14 @@ export default function Home() {
   // skipped the confirm screen — drives the dismissible dashboard banner.
   const [autoMapped, setAutoMapped] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+
+  // Invoice drill-down (inline dashboard section). `drilldownEmployee` seeds the
+  // employee filter (set when a user clicks an employee row; '' otherwise); the
+  // nonce is bumped on every open/re-filter so the Drilldown re-applies the preset
+  // even when the same employee is picked twice.
+  const [drilldownOpen, setDrilldownOpen] = useState(false)
+  const [drilldownEmployee, setDrilldownEmployee] = useState('')
+  const [drilldownNonce, setDrilldownNonce] = useState(0)
 
   // PRINT/PDF must always render in the LIGHT style regardless of the active theme,
   // so exported PDFs look clean. Strip the `.dark` class from <html> for the duration
@@ -187,6 +196,25 @@ export default function Home() {
 
   const onDismissBanner = useCallback(() => setBannerDismissed(true), [])
 
+  // Plain "Drill down" toggle: open unfiltered (bump the nonce so the Drilldown
+  // clears any prior preset and fetches the capped list), or hide it.
+  const onToggleDrilldown = useCallback(() => {
+    setDrilldownOpen((open) => {
+      if (!open) {
+        setDrilldownEmployee('')
+        setDrilldownNonce((n) => n + 1)
+      }
+      return !open
+    })
+  }, [])
+
+  // Employee row click: reveal the drill-down pre-filtered to that employee.
+  const onEmployeeDrilldown = useCallback((employee: string) => {
+    setDrilldownEmployee(employee)
+    setDrilldownNonce((n) => n + 1)
+    setDrilldownOpen(true)
+  }, [])
+
   const startOver = useCallback(() => {
     setStep('upload')
     setFile(null)
@@ -201,6 +229,9 @@ export default function Home() {
     setProgress(null)
     setAutoMapped(false)
     setBannerDismissed(false)
+    setDrilldownOpen(false)
+    setDrilldownEmployee('')
+    setDrilldownNonce(0)
   }, [])
 
   return (
@@ -330,12 +361,37 @@ export default function Home() {
             <EmployeeTable
               employees={result.employees ?? []}
               employeeBreakdown={result.employee_breakdown ?? []}
+              onEmployeeSelect={onEmployeeDrilldown}
             />
 
             <AgingBreakdown
               bucketTotals={result.bucket_totals}
               customerBreakdown={result.customer_breakdown ?? []}
             />
+
+            <div className="no-print flex justify-end">
+              <button
+                type="button"
+                data-testid="drilldown-toggle"
+                aria-expanded={drilldownOpen}
+                aria-controls="drilldown"
+                onClick={onToggleDrilldown}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-950"
+              >
+                {drilldownOpen ? 'Hide drill-down' : 'Drill down'}
+              </button>
+            </div>
+
+            {drilldownOpen && (
+              <Drilldown
+                result={result}
+                file={file!}
+                mapping={mapping}
+                sheetName={sheetName}
+                presetEmployee={drilldownEmployee}
+                presetNonce={drilldownNonce}
+              />
+            )}
 
             <FlagsPanel riskFlags={result.risk_flags ?? []} dataQuality={result.data_quality} />
           </div>

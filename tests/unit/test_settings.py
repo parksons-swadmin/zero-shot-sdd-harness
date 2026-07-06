@@ -8,6 +8,7 @@ def test_defaults(monkeypatch):
         "AGENT_MAX_ROWS",
         "AGENT_HEADER_MATCH_THRESHOLD",
         "AGENT_RISK_TOP_N",
+        "AGENT_DRILLDOWN_MAX_ROWS",
         "AGENT_AS_OF",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -20,6 +21,8 @@ def test_defaults(monkeypatch):
     assert s.max_rows == 200000
     assert s.header_match_threshold == 85
     assert s.risk_top_n == 5
+    # Phase-4 drill-down page cap (matches spec/architecture.md Settings).
+    assert s.drilldown_max_rows == 1000
     # Optional reproducibility override defaults to None (=> behavior is date.today()).
     assert s.as_of is None
 
@@ -27,12 +30,14 @@ def test_defaults(monkeypatch):
 def test_env_override(monkeypatch):
     monkeypatch.setenv("AGENT_HEADER_MATCH_THRESHOLD", "90")
     monkeypatch.setenv("AGENT_MAX_ROWS", "500")
+    monkeypatch.setenv("AGENT_DRILLDOWN_MAX_ROWS", "250")
     import config.settings as m
 
     m._settings = None
     s = m.get_settings()
     assert s.header_match_threshold == 90
     assert s.max_rows == 500
+    assert s.drilldown_max_rows == 250
 
 
 def test_no_provider_or_db_fields():

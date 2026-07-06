@@ -16,7 +16,7 @@ from datetime import date, datetime
 import pandas as pd
 
 from config.settings import get_settings
-from domain.aging import AgingMetrics
+from domain.aging import AgingMetrics, InvoiceListResult, InvoiceRow
 from domain.mapping import ColumnMapping, PreviewResult
 from graph.agent import agentic_ai
 from graph.state import AnalysisState
@@ -199,6 +199,126 @@ def run_analysis(
     metrics = final["metrics"]
     _log.info("run.complete", run_id=run_id, row_count=metrics.row_count)
     return metrics
+
+
+def _clean_optional_str(value: object) -> str | None:
+    """Coerce an object-column cell to ``str`` or ``None`` (None / NaN -> None)."""
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return str(value)
+
+
+def _iso_or_none(value: object) -> str | None:
+    """ISO string for a date-like cell, else ``None``.
+
+    Duck-typed via ``isoformat`` rather than ``isinstance(_, date)`` so it stays
+    correct even when tests monkeypatch ``graph.runner.date`` to a ``date``
+    subclass (a real ``datetime.date`` is NOT an instance of that subclass)."""
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value.isoformat()
+
+
+def run_invoices(
+    *,
+    file_bytes: bytes,
+    sheet_name: str | None,
+    mapping: ColumnMapping,
+    customer: str | None = None,
+    employee: str | None = None,
+    as_of: date | None = None,
+    limit: int | None = None,
+) -> InvoiceListResult:
+    """Invoice-level drill-down behind the dashboard, optionally filtered.
+
+    Reuses the CANONICAL ``read_workbook`` + ``normalize`` (with embedded
+    summary/grand-total exclusion) and the same ``as_of`` resolution as
+    :func:`run_analysis`, so every number ties out to ``/api/compute`` exactly.
+    Optionally filters to an exact ``customer`` and/or ``employee`` (matched
+    against the cleaned per-row label; blank/whitespace filter values are
+    ignored). ``total_count`` and ``subtotal_amount`` are computed over the FULL
+    filtered set in exact integer paise. When NO filter is set the returned
+    ``invoices`` array is capped at ``limit`` and ``truncated`` is set True iff a
+    cap was actually applied; a filtered set is returned in full (bounded).
+
+    ``limit`` defaults (when None) to ``AGENT_DRILLDOWN_MAX_ROWS``
+    (``settings.drilldown_max_rows``, default 1000) — the unfiltered-view page cap.
+    """
+    settings = get_settings()
+    as_of = as_of or settings.as_of or date.today()
+    if limit is None:
+        limit = settings.drilldown_max_rows
+    raw_df, _ = _read_or_raise(file_bytes, sheet_name)
+    _validate_mapping(mapping, [str(c) for c in raw_df.columns])
+
+    df = normalize(raw_df, mapping, as_of)
+    # Exclude embedded summary/grand-total rows before anything else, exactly as
+    # the metrics engine does (node_ingest) — otherwise the drill-down would list
+    # bogus total rows and its subtotal would diverge from the dashboard.
+    df = df[~df["is_summary"]].reset_index(drop=True)
+
+    # Normalize filter values: strip; treat empty/whitespace-only as "no filter".
+    # A meaningful literal like "(blank)" is preserved (blank labels are real).
+    customer = customer.strip() if isinstance(customer, str) and customer.strip() else None
+    employee = employee.strip() if isinstance(employee, str) and employee.strip() else None
+    has_filter = customer is not None or employee is not None
+
+    if customer is not None:
+        df = df[df["customer"] == customer]
+    if employee is not None:
+        df = df[df["employee"] == employee]
+    df = df.reset_index(drop=True)
+
+    total_count = int(len(df))
+    # Subtotal over the FULL filtered set in exact integer paise, then to rupees
+    # (same paise->rupees rounding the metrics engine uses, so it ties out).
+    subtotal_paise = int(df["amount_paise"].astype("int64").sum())
+    subtotal_amount = round(subtotal_paise / 100, 2)
+
+    truncated = (not has_filter) and total_count > limit
+    view = df.iloc[:limit] if truncated else df
+
+    customers = view["customer"].tolist()
+    invoice_nos = view["invoice_no"].tolist()
+    amounts_paise = view["amount_paise"].astype("int64").tolist()
+    due_dates = view["due_date"].tolist()
+    dpds = view["dpd"].tolist()
+    buckets = view["bucket"].tolist()
+    employees = view["employee"].tolist()
+
+    invoices = [
+        InvoiceRow(
+            customer=str(cust),
+            invoice_no=_clean_optional_str(inv),
+            amount=round(int(paise) / 100, 2),
+            due_date=_iso_or_none(due),
+            days_overdue=(None if pd.isna(dpd) else int(dpd)),
+            bucket=str(bucket),
+            employee=str(emp),
+        )
+        for cust, inv, paise, due, dpd, bucket, emp in zip(
+            customers, invoice_nos, amounts_paise, due_dates, dpds, buckets, employees
+        )
+    ]
+
+    _log.info(
+        "invoices.listed",
+        rows=int(len(raw_df)),
+        total_count=total_count,
+        returned=len(invoices),
+        truncated=truncated,
+        filtered=has_filter,
+    )
+    return InvoiceListResult(
+        invoices=invoices,
+        total_count=total_count,
+        subtotal_amount=subtotal_amount,
+        truncated=truncated,
+    )
 
 
 def _normalize_streaming(

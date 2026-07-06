@@ -43,8 +43,9 @@ Nodes call these pure helpers in `src/tools/` (no side effects, no I/O beyond re
 | `validate(df)` | `tools/validate.py` | raise `QualityFlag`s; never drop rows | `list[QualityFlag]` |
 | `compute_metrics(df, as_of, phase)` | `tools/metrics.py` | vectorized int64 aggregation → `AgingMetrics` | `AgingMetrics` |
 | `compute_risk_flags(df)` | `tools/flags.py` | rule-based riskiest accounts (Phase 2) | `list[RiskFlag]` |
+| `select_invoices(df, customer, employee, cap)` | `tools/drilldown.py` | filter normalized rows by customer/employee (AND), deterministic default sort, cap the returned page, exact integer-paise subtotal + full `total_count` (Phase 4) | `DrilldownResult` |
 
-`detect_mapping` and `read_workbook` are used by the `POST /api/preview` route directly (not the graph). The graph runs the compute pipeline on `POST /api/compute`.
+`detect_mapping` and `read_workbook` are used by the `POST /api/preview` route directly (not the graph). The graph runs the compute pipeline on `POST /api/compute`. The `POST /api/invoices` route (Phase 4) reuses `read_workbook` + `normalize` directly to obtain the same normalized DataFrame, then applies `select_invoices` — it does **not** add a graph node or alter the compute topology (a pure filter/select over the already-normalized rows).
 
 ---
 

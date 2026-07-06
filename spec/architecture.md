@@ -12,8 +12,9 @@ A single-user runs one local process (`uv run python -m src`) that serves both a
 
 ```
 Browser (Next.js static export @ /app)
-   │  POST /api/preview   (file → proposed mapping + preview)
-   │  POST /api/compute   (file + confirmed mapping → DashboardResult)
+   │  POST /api/preview    (file → proposed mapping + preview)
+   │  POST /api/compute    (file + confirmed mapping → DashboardResult)
+   │  POST /api/invoices   (file + mapping + optional filters → DrilldownResult)   ← Phase 4
    ▼
 FastAPI (src/api)  ── serves frontend/out at /app
    │
@@ -34,7 +35,7 @@ In-memory pandas DataFrame  →  AgingMetrics (JSON)  →  discarded at end of r
 | Layer | Responsibility |
 |-------|----------------|
 | Frontend (Next.js static export) | Upload, mapping-confirmation, dashboard rendering, INR formatting, exports |
-| API (FastAPI) | `/api/preview`, `/api/compute` (+ Phase-3 `/api/compute/stream`, `/api/export/*`); response envelope; error rendering; serves `/app` |
+| API (FastAPI) | `/api/preview`, `/api/compute` (+ Phase-3 `/api/compute/stream`, `/api/export/*`; + Phase-4 `/api/invoices`); response envelope; error rendering; serves `/app` |
 | Graph (LangGraph, deterministic) | Orchestrates the fixed ingest→validate→compute→flag→assemble pipeline |
 | Tools (pure functions) | Header detection, workbook read, normalization, validation, exact metrics, rule-based flags |
 | Observability (structlog) | Structured per-node/per-request JSON logs (counts + timings only) |
@@ -117,6 +118,7 @@ Rewritten to drop all provider/DB keys. Fields (all optional, sensible defaults)
 | `AGENT_MAX_ROWS` | `200000` | Row-count cap |
 | `AGENT_HEADER_MATCH_THRESHOLD` | `85` | rapidfuzz high-confidence cutoff |
 | `AGENT_RISK_TOP_N` | `5` | Riskiest-accounts count (Phase 2) |
+| `AGENT_DRILLDOWN_MAX_ROWS` | `1000` | Max invoice rows returned by `POST /api/invoices` (Phase 4); the full filtered `total_count`/`subtotal_amount` are always reported regardless of this cap |
 | `AGENT_AS_OF` | (unset → today) | Optional reproducibility override for the aging reference date; when unset, the pipeline uses `date.today()`. Used to reproduce the bundled demo/tests deterministically. |
 
 > **`PORT` is NOT an `AGENT_`-prefixed Settings field.** It is a plain/bare env var read directly via `os.environ.get("PORT")` (default `8001`) — used for the E2E harness / port override. It lives outside the `AGENT_`-prefixed `Settings` model above.

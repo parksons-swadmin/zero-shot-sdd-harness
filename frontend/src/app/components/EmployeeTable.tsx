@@ -6,16 +6,27 @@
 // The weighted-average days-overdue column is looked up from employee_breakdown by
 // key === employee; it renders "—" when the employee has no overdue balance.
 
-import { useMemo } from 'react'
+import { useMemo, type KeyboardEvent } from 'react'
 import { inr, pct, intFmt, dpd, bucketLabel } from '@/lib/format'
 import type { EmployeeSummary, GroupBreakdown } from '@/lib/types'
 
 interface EmployeeTableProps {
   employees: EmployeeSummary[]
   employeeBreakdown: GroupBreakdown[]
+  /**
+   * When provided, each employee row becomes clickable and calls this with the
+   * employee label — the dashboard opens the invoice drill-down pre-filtered to
+   * that employee. Omitted → the table renders exactly as before (static rows).
+   */
+  onEmployeeSelect?: (employee: string) => void
 }
 
-export default function EmployeeTable({ employees, employeeBreakdown }: EmployeeTableProps) {
+export default function EmployeeTable({
+  employees,
+  employeeBreakdown,
+  onEmployeeSelect,
+}: EmployeeTableProps) {
+  const clickable = Boolean(onEmployeeSelect)
   // Map employee -> weighted-avg days overdue for the "Avg days overdue" column.
   const wavgByEmployee = useMemo(() => {
     const m = new Map<string, number | null>()
@@ -75,8 +86,31 @@ export default function EmployeeTable({ employees, employeeBreakdown }: Employee
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {employees.map((e) => {
                 const isBlank = e.employee === '(blank)'
+                const label = isBlank ? '(blank)' : e.employee
                 return (
-                  <tr key={e.employee}>
+                  <tr
+                    key={e.employee}
+                    data-testid="employee-row"
+                    {...(clickable
+                      ? {
+                          role: 'button' as const,
+                          tabIndex: 0,
+                          'aria-label': `Drill down to invoices for ${label}`,
+                          onClick: () => onEmployeeSelect?.(e.employee),
+                          onKeyDown: (ev: KeyboardEvent<HTMLTableRowElement>) => {
+                            if (ev.key === 'Enter' || ev.key === ' ') {
+                              ev.preventDefault()
+                              onEmployeeSelect?.(e.employee)
+                            }
+                          },
+                        }
+                      : {})}
+                    className={
+                      clickable
+                        ? 'cursor-pointer transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:hover:bg-slate-800/60 dark:focus:bg-slate-800/60'
+                        : undefined
+                    }
+                  >
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
                       {isBlank ? (
                         <span className="italic text-slate-500 dark:text-slate-400">(blank)</span>

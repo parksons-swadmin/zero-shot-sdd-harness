@@ -64,6 +64,37 @@ class EmployeeBreakdown(BaseModel):
     total_outstanding: float
 
 
+class InvoiceRow(BaseModel):
+    """One invoice-level row behind the dashboard (drill-down list).
+
+    Money is a rupee float (paise / 100, 2dp); negative values are credit notes
+    and are kept. ``days_overdue`` is the row's DPD (``None`` when the due date is
+    missing/unparseable); ``bucket`` is the row's aging-bucket string.
+    """
+
+    customer: str
+    invoice_no: str | None
+    amount: float
+    due_date: str | None
+    days_overdue: int | None
+    bucket: str
+    employee: str
+
+
+class InvoiceListResult(BaseModel):
+    """Invoice-level drill-down payload for ``POST /api/invoices``.
+
+    ``total_count`` and ``subtotal_amount`` are computed over the FULL filtered
+    set (exact integer paise) and always reflect it, even when the returned
+    ``invoices`` array is capped (``truncated=True``).
+    """
+
+    invoices: list[InvoiceRow]
+    total_count: int
+    subtotal_amount: float
+    truncated: bool
+
+
 class AgingMetrics(BaseModel):
     """Computed AR aging metrics (compute node output).
 

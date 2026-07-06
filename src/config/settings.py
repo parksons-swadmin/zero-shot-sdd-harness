@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     header_match_threshold: int = Field(default=85)
     risk_top_n: int = Field(default=5)
 
+    # Hard cap on the number of invoice rows POST /api/invoices returns in the
+    # unfiltered drill-down view (env AGENT_DRILLDOWN_MAX_ROWS). total_count and
+    # subtotal_amount are ALWAYS reported over the full filtered set regardless
+    # of this cap. See spec/architecture.md Settings + invoice_drilldown.md.
+    drilldown_max_rows: int = Field(default=1000)
+
     # Optional server-level reproducibility override for the aging reference date.
     # Reads env var AGENT_AS_OF (ISO date, e.g. 2026-01-15). Unset (None) => date.today().
     as_of: date | None = Field(default=None)

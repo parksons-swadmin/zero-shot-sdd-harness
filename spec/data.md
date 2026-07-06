@@ -96,6 +96,11 @@ One parsed invoice after the mapping is applied.
 ### Value object: `DashboardResult`
 The `POST /api/compute` response payload = `AgingMetrics` plus `source_filename` and `sheet_name`. Single source of truth for the UI and both exports.
 
+### Value objects: `InvoiceRow` / `DrilldownResult` *(Phase 4)*
+The `POST /api/invoices` response payload (see [api.md](api.md) and [capabilities/invoice_drilldown.md](capabilities/invoice_drilldown.md)). Both are **projections of the existing normalized `Invoice` rows** for a filter — no new persisted data.
+- `InvoiceRow`: `customer` (str), `invoice_no` (str \| null), `amount` (₹ number, 2dp, from `amount_paise`), `due_date` (ISO date \| null), `days_overdue` (int \| null = `Invoice.dpd`), `bucket` (the `Invoice.bucket` enum incl. `unclassified`), `employee` (str, `"(blank)"` when blank).
+- `DrilldownResult`: `invoices` (`list[InvoiceRow]`, capped at `AGENT_DRILLDOWN_MAX_ROWS`), `total_count` (int — full filtered-set count), `subtotal_amount` (₹ number, 2dp — exact integer-paise sum over the full filtered set), `truncated` (bool — `total_count > len(invoices)`).
+
 ---
 
 ## Exactness rule (money)

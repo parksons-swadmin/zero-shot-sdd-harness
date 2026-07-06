@@ -5,10 +5,6 @@ import path from 'path'
 // up three levels reaches the repo root.
 const FIXTURE = path.resolve(__dirname, '../../../tests/fixtures/ar_small.xlsx')
 
-// Pin the OS preference to light so the initial theme is deterministic (no `.dark`
-// on <html> before the user toggles).
-test.use({ colorScheme: 'light' })
-
 test('theme toggle switches the dark class on <html>', async ({ page }) => {
   await page.goto('/app/')
   await expect(page.getByRole('heading', { name: /AR Aging Dashboard/i })).toBeVisible()
@@ -17,26 +13,29 @@ test('theme toggle switches the dark class on <html>', async ({ page }) => {
   const toggle = page.getByTestId('theme-toggle')
   await expect(toggle).toBeVisible()
 
-  // Starts light (colorScheme pinned to light, nothing stored).
-  await expect(html).not.toHaveClass(/dark/)
-
-  // Toggle → dark class appears on <html>.
-  await toggle.click()
+  // With nothing stored the app defaults to DARK.
   await expect(html).toHaveClass(/dark/)
 
-  // Toggle again → back to light.
+  // Toggle → light (dark class removed from <html>).
   await toggle.click()
   await expect(html).not.toHaveClass(/dark/)
+
+  // Toggle again → back to dark.
+  await toggle.click()
+  await expect(html).toHaveClass(/dark/)
 })
 
-test('an explicit dark choice persists across a reload', async ({ page }) => {
+test('an explicit light choice persists across a reload', async ({ page }) => {
   await page.goto('/app/')
+  // Default is DARK; toggling makes an EXPLICIT 'light' choice (stored under `ar-theme`).
+  await expect(page.locator('html')).toHaveClass(/dark/)
   await page.getByTestId('theme-toggle').click()
-  await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect(page.locator('html')).not.toHaveClass(/dark/)
 
-  // Reload: the pre-paint script must restore the stored preference before first paint.
+  // Reload: the pre-paint script must restore the stored 'light' preference before
+  // first paint — otherwise it would fall back to the dark default.
   await page.reload()
-  await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect(page.locator('html')).not.toHaveClass(/dark/)
 })
 
 test('Data-quality audit button opens an accessible modal listing the flagged rows', async ({

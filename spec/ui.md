@@ -66,7 +66,21 @@ When `auto_mapped=false`, nothing changes: the Mapping Confirmation screen is sh
 **Phase 3 wires in:** working Excel export, working print-to-PDF, live progress bar for large files.
 **Phase 3.2 refines:** the **risk-flags** (riskiest 90+ accounts) stay **inline** on the dashboard, but the detailed **data-quality audit** (the per-row flagged-rows table + the by-reason breakdown — the technical "which rows are messy" view) is **no longer shown inline**; a **"Data-quality audit" button** opens it on demand in a modal/drawer, framed as an admin / spot-check view. The small **"N summary/total rows excluded"** tie-out note stays **visible inline** (it explains the totals). See [roadmap.md](roadmap.md) Phase 3.2.
 
+**Phase 4 wires in:** the **Invoice drill-down** — a **"Drill down" button** on the dashboard reveals an inline drill-down **section** (not a modal) with a searchable customer picker, an employee filter, a sortable per-invoice table and a filtered subtotal; **clicking an employee row** in the employee-wise summary opens the same section pre-filtered to that employee. See the dedicated section below and [capabilities/invoice_drilldown.md](capabilities/invoice_drilldown.md).
+
 **States:** empty (before compute — dashboard hidden); loading ("Computing metrics…", real work); error (server/compute error with message + "Start over"); populated (ideal).
+
+### Section: Invoice Drill-down *(Phase 4 — see [roadmap.md](roadmap.md))*
+**Purpose:** inspect the individual invoices behind the aggregates.
+**Entry points:** (a) a **"Drill down" button** on the dashboard toggles an **inline section** (not a modal) directly below the dashboard; (b) **clicking a row** in the employee-wise summary table opens the same section with the **employee filter pre-set** to that employee (and scrolls it into view).
+**Key elements:**
+- **Searchable customer picker** — type-to-search combobox over the full distinct customer list (sourced client-side from `DashboardResult.customer_breakdown[].key`; handles 1,000+ customers with client-side filtering). Clearable ("All customers").
+- **Employee filter** — dropdown over `DashboardResult.employees[].employee` (incl. `"(blank)"`). Clearable ("All employees"). Filters combine (customer **AND** employee).
+- **Filtered subtotal line** — e.g. `Beacon & Co — 12 invoices · ₹37,50,000` — the invoice count + total amount due for the **current filter**, computed over the full filtered set (from `total_count` / `subtotal_amount`), formatted with Indian grouping.
+- **Invoice table** — columns: Customer · Invoice no. · Amount due (₹) · Due date · Days overdue · Aging bucket. Sortable by **Amount**, **Days overdue**, **Due date** (client-side over the returned rows; a visible sort indicator on the active column). Missing due dates show `—` and bucket `unclassified`; negative credit notes render with their sign.
+- **Truncation prompt** — when the response has `truncated=true` (an unfiltered/broad view over a large file), a non-error banner: "Showing first N of M invoices — pick a customer or employee to see them all."
+**Actions:** open/close the section; pick/clear customer; pick/clear employee; click a column header to sort → each change re-calls `POST /api/invoices` (filters) or re-sorts locally (columns). Filter changes show a labelled loading state in the section.
+**States:** collapsed (section hidden until "Drill down" or an employee-row click); loading (fetching invoices); empty (a filter matches no rows → "No invoices for this filter", not an error); populated; error (server error → inline message, dashboard above stays intact).
 
 ---
 
