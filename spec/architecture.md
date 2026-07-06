@@ -118,7 +118,8 @@ Rewritten to drop all provider/DB keys. Fields (all optional, sensible defaults)
 | `AGENT_HEADER_MATCH_THRESHOLD` | `85` | rapidfuzz high-confidence cutoff |
 | `AGENT_RISK_TOP_N` | `5` | Riskiest-accounts count (Phase 2) |
 | `AGENT_AS_OF` | (unset → today) | Optional reproducibility override for the aging reference date; when unset, the pipeline uses `date.today()`. Used to reproduce the bundled demo/tests deterministically. |
-| `PORT` | `8001` | Server port |
+
+> **`PORT` is NOT an `AGENT_`-prefixed Settings field.** It is a plain/bare env var read directly via `os.environ.get("PORT")` (default `8001`) — used for the E2E harness / port override. It lives outside the `AGENT_`-prefixed `Settings` model above.
 
 **`.env` needs NO API keys.** `.env.example` is rewritten to contain only the above (with defaults) — no provider or database entries.
 

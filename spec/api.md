@@ -27,12 +27,12 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 {
   "sheets": ["Sheet1", "Aging"],
   "sheet_name": "Sheet1",
-  "columns": ["Cust Name", "Invoice #", "Inv. Date", "Due Dt", "Balance Outstanding", "Sales Person"],
+  "columns": ["Cust Name", "Invoice #", "Inv. Date", "Payable On", "Balance Outstanding", "Sales Person"],
   "proposed_mapping": [
     {"field": "customer",     "matched_column": "Cust Name",           "confidence": 90, "status": "high"},
     {"field": "invoice_no",   "matched_column": "Invoice #",           "confidence": 88, "status": "high"},
     {"field": "invoice_date", "matched_column": "Inv. Date",           "confidence": 86, "status": "high"},
-    {"field": "due_date",     "matched_column": "Due Dt",              "confidence": 72, "status": "low"},
+    {"field": "due_date",     "matched_column": "Payable On",          "confidence": 72, "status": "low"},
     {"field": "amount",       "matched_column": "Balance Outstanding", "confidence": 91, "status": "high"},
     {"field": "employee",     "matched_column": "Sales Person",        "confidence": 95, "status": "high"},
     {"field": "hod",          "matched_column": "HoD Name",            "confidence": 70, "status": "low"}
@@ -88,7 +88,7 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 }
 ```
 
-**Phase 2** additionally populates `employees`, `customer_breakdown`, `employee_breakdown`, `risk_flags`, and `data_quality.rows`. Phase-1 responses omit or null these; the frontend shows labelled stubs. Each `EmployeeSummary` in `employees` also carries an optional `hod: string | null` (the Head-of-Department name for that employee; `null` when `hod` is unmapped or blank for that employee).
+The `employees`, `customer_breakdown`, `employee_breakdown`, `risk_flags`, and `data_quality.rows` fields are computed **unconditionally** by the engine and always present on every `/api/compute` response (empty lists only when a partition is genuinely empty); phase-gating of these surfaces is a frontend display concern. Each `EmployeeSummary` in `employees` also carries an optional `hod: string | null` (the Head-of-Department name for that employee; `null` when `hod` is unmapped or blank for that employee).
 
 **Reference date:** `as_of` is `date.today()` unless the server is started with `AGENT_AS_OF` set (a server-level reproducibility override; see [architecture.md](architecture.md) Settings). There is **no per-request `as_of` field** on the API.
 
@@ -110,9 +110,9 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 
 **Purpose:** Same inputs as `/api/compute`; streams `{phase, rows_done, rows_total}` progress events, then a final event carrying the identical `DashboardResult`. Falls back to `/api/compute` if unused. See [large_file_progress.md](capabilities/large_file_progress.md).
 
-### `GET /api/export/xlsx` / `GET /api/export/pdf` *(Phase 3)*
+### `POST /api/export/xlsx` / `GET /api/export/pdf` *(Phase 3)*
 
-Excel export is generated server-side from the same `DashboardResult` (see [excel_export.md](capabilities/excel_export.md)). PDF is produced client-side via `window.print()` (see [pdf_export.md](capabilities/pdf_export.md)); no server PDF endpoint is required — the `/api/export/pdf` slot is reserved and may be dropped if the client-side approach fully covers it.
+Excel export is generated server-side from the same `DashboardResult` (see [excel_export.md](capabilities/excel_export.md)). It is a **POST** (not GET) because — the server being stateless — the file bytes + confirmed mapping are re-sent in the request body, which a GET cannot carry. PDF is produced client-side via `window.print()` (see [pdf_export.md](capabilities/pdf_export.md)); no server PDF endpoint is required — the `/api/export/pdf` slot is reserved and may be dropped if the client-side approach fully covers it.
 > **Assumed:** PDF is client-side only; the server exposes no PDF endpoint.
 
 ### `GET /health` *(existing)* — liveness check, unchanged.

@@ -80,7 +80,7 @@ One parsed invoice after the mapping is applied.
 | risk_flags | `list[RiskFlag]` | 2 | Riskiest accounts |
 | data_quality | `DataQualityReport` | 1 (counts) / 2 (full list) | Flagged rows |
 
-> Phase-1 responses omit or null the Phase-2 fields; the frontend shows labelled stubs for them.
+> The engine computes `employees`, `customer_breakdown`, and `employee_breakdown` **unconditionally** — they are always populated on every `/api/compute` response (defaulting to empty lists only when a partition is genuinely empty), not phase-gated in the payload. Phase-gating is a **frontend display** concern: the UI shows labelled stubs for these surfaces until the phase that renders them, even though the data is present on the wire.
 
 > **`as_of` reference date:** the served/demo path can pin the reference date via the optional `AGENT_AS_OF` env var for reproducibility (lets the bundled demo fixture reproduce the documented dashboard deterministically). Default is `date.today()`; with the var unset, real files always age to today. See [architecture.md](architecture.md) Settings.
 

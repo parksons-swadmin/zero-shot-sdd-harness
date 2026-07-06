@@ -46,7 +46,7 @@ Today this analysis is done by hand in Excel with pivot tables and manual formul
 A code-generator produces `tests/fixtures/build_fixtures.py` (pandas/openpyxl) generating two workbooks, plus **independent** expected-value oracles.
 
 ### `ar_small.xlsx` — hand-computable tie-out fixture (~18 rows)
-Fixed, known rows anchored to **`AS_OF = date(2026, 1, 15)`** (tests inject this `as_of`, so buckets never go stale). Deliberately messy headers to exercise fuzzy matching: `Cust Name`, `Invoice #`, `Inv. Date`, `Due Dt`, `Balance Outstanding`, `Sales Person` (the `due_date` header is chosen to land at `low` confidence so the confirm-screen path is exercised).
+Fixed, known rows anchored to **`AS_OF = date(2026, 1, 15)`** (tests inject this `as_of`, so buckets never go stale). Deliberately messy headers to exercise fuzzy matching: `Cust Name`, `Invoice #`, `Inv. Date`, `Payable On`, `Balance Outstanding`, `Sales Person` (the `due_date` header `Payable On` is chosen to land at `low` confidence so the confirm-screen path is exercised — `Due Dt` is avoided because it equals the `due dt` synonym seed and would resolve `high`, skipping the confirm path).
 Required rows / edge cases:
 - 5 customers incl. unicode: `Acme Corp`, `Müller Traders`, a Devanagari name (`श्री एंटरप्राइजेज`), `Zenith Ltd`, `Beacon & Co`.
 - 3 employees: `Ravi`, `Priya`, and **one blank employee** on one row.
@@ -110,7 +110,7 @@ Deterministically generated with a **seeded** RNG (reproducible). **High-value r
 - **Goal:** Wire the remaining stubs: multi-sheet Excel export, print-ready PDF, and a live progress bar for large files.
 - **Capabilities (≥3):** [excel_export](capabilities/excel_export.md), [pdf_export](capabilities/pdf_export.md), [large_file_progress](capabilities/large_file_progress.md).
 - **Independent slices (parallel build units):**
-  - `export-backend` (backend) — **deps: none** (uses existing `AgingMetrics`). Owns `src/tools/excel_export.py`, `src/api/analysis.py` (+`GET /api/export/xlsx`, +`POST /api/compute/stream` SSE). Unit/integration: read the workbook back and assert sheet totals equal the API metrics; stream final result equals non-streaming result.
+  - `export-backend` (backend) — **deps: none** (uses existing `AgingMetrics`). Owns `src/tools/excel_export.py`, `src/api/analysis.py` (+`POST /api/export/xlsx`, +`POST /api/compute/stream` SSE). Unit/integration: read the workbook back and assert sheet totals equal the API metrics; stream final result equals non-streaming result.
   - `frontend-phase3` (frontend) — **deps: none for build**. Owns the working "Export Excel" download, "Print / Save as PDF" button + `@media print` stylesheet, and the SSE-driven progress bar with fallback. Files: `frontend/src/app/components/{ExportBar,ProgressBar}.tsx`, `frontend/src/app/print.css`, `frontend/tests/e2e/phase3.spec.ts`.
 - **Key surfaces / files:** disjoint (backend `src/`, frontend `frontend/`).
 - **Gate command:**
