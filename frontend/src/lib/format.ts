@@ -24,3 +24,25 @@ export const pct = (r: number): string => (r * 100).toFixed(1) + '%'
  * e.g. intFmt(60000) -> "60,000"
  */
 export const intFmt = (n: number): string => new Intl.NumberFormat('en-IN').format(n)
+
+/**
+ * Weighted-average days-overdue → one-decimal number, or the em-dash "—" when null.
+ * Null is the honest "no overdue balance in this group" case — never rendered as 0.
+ * e.g. dpd(73.42) -> "73.4"; dpd(null) -> "—"
+ */
+export const dpd = (v: number | null | undefined): string =>
+  v == null ? '—' : v.toFixed(1)
+
+/** Human labels for aging buckets. Covers overdue bands, current, and the "no overdue" case. */
+export const BUCKET_LABELS: Record<string, string> = {
+  current: 'Current',
+  '0-30': '0–30 days',
+  '31-60': '31–60 days',
+  '61-90': '61–90 days',
+  '90+': '90+ days',
+  none: 'None',
+  unclassified: 'Unclassified',
+}
+
+/** Safe bucket label lookup that never returns undefined. */
+export const bucketLabel = (b: string): string => BUCKET_LABELS[b] ?? b

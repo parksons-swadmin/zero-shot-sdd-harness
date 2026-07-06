@@ -1,3 +1,5 @@
+from datetime import date
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,6 +22,10 @@ class Settings(BaseSettings):
     max_rows: int = Field(default=200000)
     header_match_threshold: int = Field(default=85)
     risk_top_n: int = Field(default=5)
+
+    # Optional server-level reproducibility override for the aging reference date.
+    # Reads env var AGENT_AS_OF (ISO date, e.g. 2026-01-15). Unset (None) => date.today().
+    as_of: date | None = Field(default=None)
 
 
 _settings: Settings | None = None

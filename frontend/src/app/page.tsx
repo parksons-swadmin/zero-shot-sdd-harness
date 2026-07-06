@@ -5,6 +5,9 @@ import Upload from './components/Upload'
 import MappingConfirm from './components/MappingConfirm'
 import KpiTiles from './components/KpiTiles'
 import TopCustomersChart from './components/TopCustomersChart'
+import EmployeeTable from './components/EmployeeTable'
+import AgingBreakdown from './components/AgingBreakdown'
+import FlagsPanel from './components/FlagsPanel'
 import Stubs from './components/Stubs'
 import { postCompute, postPreview } from '@/lib/api'
 import { intFmt } from '@/lib/format'
@@ -164,6 +167,18 @@ export default function Home() {
             <KpiTiles result={result} />
 
             <TopCustomersChart data={result.top_customers_by_overdue} />
+
+            <EmployeeTable
+              employees={result.employees ?? []}
+              employeeBreakdown={result.employee_breakdown ?? []}
+            />
+
+            <AgingBreakdown
+              bucketTotals={result.bucket_totals}
+              customerBreakdown={result.customer_breakdown ?? []}
+            />
+
+            <FlagsPanel riskFlags={result.risk_flags ?? []} dataQuality={result.data_quality} />
 
             <Stubs />
           </div>

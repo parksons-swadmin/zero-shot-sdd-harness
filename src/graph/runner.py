@@ -146,7 +146,7 @@ def run_analysis(
     mapping: ColumnMapping,
     as_of: date | None = None,
 ) -> AgingMetrics:
-    as_of = as_of or date.today()
+    as_of = as_of or get_settings().as_of or date.today()
     raw_df, _ = _read_or_raise(file_bytes, sheet_name)
     _validate_mapping(mapping, [str(c) for c in raw_df.columns])
 

@@ -8,6 +8,7 @@ def test_defaults(monkeypatch):
         "AGENT_MAX_ROWS",
         "AGENT_HEADER_MATCH_THRESHOLD",
         "AGENT_RISK_TOP_N",
+        "AGENT_AS_OF",
     ):
         monkeypatch.delenv(var, raising=False)
     import config.settings as m
@@ -19,6 +20,8 @@ def test_defaults(monkeypatch):
     assert s.max_rows == 200000
     assert s.header_match_threshold == 85
     assert s.risk_top_n == 5
+    # Optional reproducibility override defaults to None (=> behavior is date.today()).
+    assert s.as_of is None
 
 
 def test_env_override(monkeypatch):

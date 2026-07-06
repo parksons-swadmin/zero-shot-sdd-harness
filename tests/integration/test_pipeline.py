@@ -128,6 +128,47 @@ def test_compute_ties_out_to_oracle(client, small_xlsx_bytes, expected_small, fi
 
 
 # --------------------------------------------------------------------------- #
+# /api/compute — Phase-2 blocks are populated on the wire
+# --------------------------------------------------------------------------- #
+def test_compute_returns_phase2_blocks(client, small_xlsx_bytes, expected_small, fixed_today):
+    pv = client.post(
+        "/api/preview",
+        files={"file": ("ar_small.xlsx", small_xlsx_bytes, "application/octet-stream")},
+    )
+    assert pv.status_code == 200, pv.text
+    preview_data = pv.json()["data"]
+    mapping = _mapping_from_preview(preview_data)
+
+    resp = client.post(
+        "/api/compute",
+        files={"file": ("ar_small.xlsx", small_xlsx_bytes, "application/octet-stream")},
+        data={"sheet_name": preview_data["sheet_name"], "mapping": json.dumps(mapping)},
+    )
+    assert resp.status_code == 200, resp.text
+    d = resp.json()["data"]
+
+    # Employee summary: ranked desc by outstanding, with the blank-employee row.
+    assert [e["employee"] for e in d["employees"]] == ["Ravi", "Priya", "(blank)"]
+
+    # Group breakdowns present for every customer/employee.
+    assert len(d["customer_breakdown"]) == 5
+    assert len(d["employee_breakdown"]) == 3
+    zenith = next(b for b in d["customer_breakdown"] if b["key"] == "Zenith Ltd")
+    assert zenith["weighted_avg_days_overdue"] is None  # renders as em dash
+
+    # Risk flags: deepest 90+ first.
+    assert d["risk_flags"][0]["customer"] == "Beacon & Co"
+    assert d["risk_flags"][0]["reason"] == "largest 90+ overdue"
+    assert [f["customer"] for f in d["risk_flags"]] == ["Beacon & Co", "Acme Corp"]
+
+    # Data-quality audit list surfaces every seeded flagged row.
+    assert {r["row_index"] for r in d["data_quality"]["rows"]} == {14, 15, 16, 17}
+    got = {(r["row_index"], r["field"], r["reason"]) for r in d["data_quality"]["rows"]}
+    want = {(f["row_index"], f["field"], f["reason"]) for f in expected_small["flags"]}
+    assert got == want
+
+
+# --------------------------------------------------------------------------- #
 # Error paths
 # --------------------------------------------------------------------------- #
 def _assert_error_shape(resp, expected_status: int, code: str | None = None):

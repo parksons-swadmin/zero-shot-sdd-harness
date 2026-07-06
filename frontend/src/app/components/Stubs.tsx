@@ -1,10 +1,12 @@
 'use client'
 
-// Clearly-labelled, non-functional previews of features arriving in later phases.
+// Clearly-labelled, non-functional previews of features arriving in Phase 3.
 // These are honest placeholders — visibly tagged, visibly disabled, never mistakable
 // for a bug or for a real (broken) feature. See spec/ui.md "LABELLED NON-FUNCTIONAL STUBS".
+// (The Phase-2 stubs — employee summary, aging breakdown, risk/data-quality — are now
+//  real features rendered above this section.)
 
-function PhasePill({ phase }: { phase: 2 | 3 }) {
+function PhasePill({ phase }: { phase: 3 }) {
   return (
     <span className="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
       Coming in Phase {phase}
@@ -17,7 +19,7 @@ function StubCard({
   title,
   children,
 }: {
-  phase: 2 | 3
+  phase: 3
   title: string
   children: React.ReactNode
 }) {
@@ -43,25 +45,8 @@ export default function Stubs() {
           More insights on the way
         </h3>
         <p className="text-sm text-slate-500">
-          These sections are previews of what unlocks in the next phases — they are not active yet.
+          These sections are previews of what unlocks in Phase 3 — they are not active yet.
         </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <StubCard phase={2} title="Employee-wise summary">
-          A ranked table of each salesperson’s outstanding and overdue totals, so you know who to
-          chase.
-        </StubCard>
-
-        <StubCard phase={2} title="Aging breakdown & avg. days overdue">
-          Per-bucket totals (current / 0–30 / 31–60 / 61–90 / 90+) plus the weighted-average days
-          overdue per customer and employee.
-        </StubCard>
-
-        <StubCard phase={2} title="Risk flags & data-quality audit">
-          Proactive flags for the riskiest accounts, plus the full list of flagged and unparseable
-          rows by row number.
-        </StubCard>
       </div>
 
       <StubCard phase={3} title="Export & print">

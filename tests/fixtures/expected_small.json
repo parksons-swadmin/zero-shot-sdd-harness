@@ -73,5 +73,223 @@
       "field": "employee",
       "reason": "blank_employee"
     }
+  ],
+  "employees": [
+    {
+      "employee": "Ravi",
+      "total_outstanding": 6200000.0,
+      "total_overdue": 4050000.0,
+      "total_outstanding_paise": 620000000,
+      "total_overdue_paise": 405000000,
+      "pct_overdue": 0.6532258064516129,
+      "worst_bucket": "90+",
+      "invoice_count": 9
+    },
+    {
+      "employee": "Priya",
+      "total_outstanding": 4700000.0,
+      "total_overdue": 4100000.0,
+      "total_outstanding_paise": 470000000,
+      "total_overdue_paise": 410000000,
+      "pct_overdue": 0.8723404255319149,
+      "worst_bucket": "90+",
+      "invoice_count": 8
+    },
+    {
+      "employee": "(blank)",
+      "total_outstanding": 275000.0,
+      "total_overdue": 275000.0,
+      "total_outstanding_paise": 27500000,
+      "total_overdue_paise": 27500000,
+      "pct_overdue": 1.0,
+      "worst_bucket": "0-30",
+      "invoice_count": 1
+    }
+  ],
+  "customer_breakdown": [
+    {
+      "key": "Acme Corp",
+      "bucket_totals": {
+        "current": 800000.0,
+        "b_0_30": 1475000.0,
+        "b_31_60": 900000.0,
+        "b_61_90": 0.0,
+        "b_90_plus": 250000.0
+      },
+      "bucket_totals_paise": {
+        "current": 80000000,
+        "0-30": 147500000,
+        "31-60": 90000000,
+        "61-90": 0,
+        "90+": 25000000
+      },
+      "weighted_avg_days_overdue": 55.22,
+      "pct_overdue": 0.6687898089171974,
+      "total_outstanding": 3925000.0,
+      "total_outstanding_paise": 392500000
+    },
+    {
+      "key": "Beacon & Co",
+      "bucket_totals": {
+        "current": 0.0,
+        "b_0_30": 0.0,
+        "b_31_60": 0.0,
+        "b_61_90": 0.0,
+        "b_90_plus": 3750000.0
+      },
+      "bucket_totals_paise": {
+        "current": 0,
+        "0-30": 0,
+        "31-60": 0,
+        "61-90": 0,
+        "90+": 375000000
+      },
+      "weighted_avg_days_overdue": 200.33,
+      "pct_overdue": 1.0,
+      "total_outstanding": 3750000.0,
+      "total_outstanding_paise": 375000000
+    },
+    {
+      "key": "Müller Traders",
+      "bucket_totals": {
+        "current": 450000.0,
+        "b_0_30": 350000.0,
+        "b_31_60": -150000.0,
+        "b_61_90": 800000.0,
+        "b_90_plus": 0.0
+      },
+      "bucket_totals_paise": {
+        "current": 45000000,
+        "0-30": 35000000,
+        "31-60": -15000000,
+        "61-90": 80000000,
+        "90+": 0
+      },
+      "weighted_avg_days_overdue": 59.8,
+      "pct_overdue": 0.6896551724137931,
+      "total_outstanding": 1450000.0,
+      "total_outstanding_paise": 145000000
+    },
+    {
+      "key": "श्री एंटरप्राइजेज",
+      "bucket_totals": {
+        "current": 0.0,
+        "b_0_30": 0.0,
+        "b_31_60": 750000.0,
+        "b_61_90": 300000.0,
+        "b_90_plus": 0.0
+      },
+      "bucket_totals_paise": {
+        "current": 0,
+        "0-30": 0,
+        "31-60": 75000000,
+        "61-90": 30000000,
+        "90+": 0
+      },
+      "weighted_avg_days_overdue": 45.24,
+      "pct_overdue": 1.0,
+      "total_outstanding": 1050000.0,
+      "total_outstanding_paise": 105000000
+    },
+    {
+      "key": "Zenith Ltd",
+      "bucket_totals": {
+        "current": 1000000.0,
+        "b_0_30": 0.0,
+        "b_31_60": 0.0,
+        "b_61_90": 0.0,
+        "b_90_plus": 0.0
+      },
+      "bucket_totals_paise": {
+        "current": 100000000,
+        "0-30": 0,
+        "31-60": 0,
+        "61-90": 0,
+        "90+": 0
+      },
+      "weighted_avg_days_overdue": null,
+      "pct_overdue": 0.0,
+      "total_outstanding": 1000000.0,
+      "total_outstanding_paise": 100000000
+    }
+  ],
+  "employee_breakdown": [
+    {
+      "key": "Ravi",
+      "bucket_totals": {
+        "current": 1650000.0,
+        "b_0_30": 350000.0,
+        "b_31_60": 900000.0,
+        "b_61_90": 300000.0,
+        "b_90_plus": 2500000.0
+      },
+      "bucket_totals_paise": {
+        "current": 165000000,
+        "0-30": 35000000,
+        "31-60": 90000000,
+        "61-90": 30000000,
+        "90+": 250000000
+      },
+      "weighted_avg_days_overdue": 146.93,
+      "pct_overdue": 0.6532258064516129,
+      "total_outstanding": 6200000.0,
+      "total_outstanding_paise": 620000000
+    },
+    {
+      "key": "Priya",
+      "bucket_totals": {
+        "current": 600000.0,
+        "b_0_30": 1200000.0,
+        "b_31_60": 600000.0,
+        "b_61_90": 800000.0,
+        "b_90_plus": 1500000.0
+      },
+      "bucket_totals_paise": {
+        "current": 60000000,
+        "0-30": 120000000,
+        "31-60": 60000000,
+        "61-90": 80000000,
+        "90+": 150000000
+      },
+      "weighted_avg_days_overdue": 98.01,
+      "pct_overdue": 0.8723404255319149,
+      "total_outstanding": 4700000.0,
+      "total_outstanding_paise": 470000000
+    },
+    {
+      "key": "(blank)",
+      "bucket_totals": {
+        "current": 0.0,
+        "b_0_30": 275000.0,
+        "b_31_60": 0.0,
+        "b_61_90": 0.0,
+        "b_90_plus": 0.0
+      },
+      "bucket_totals_paise": {
+        "current": 0,
+        "0-30": 27500000,
+        "31-60": 0,
+        "61-90": 0,
+        "90+": 0
+      },
+      "weighted_avg_days_overdue": 24.0,
+      "pct_overdue": 1.0,
+      "total_outstanding": 275000.0,
+      "total_outstanding_paise": 27500000
+    }
+  ],
+  "risk_flags": [
+    {
+      "customer": "Beacon & Co",
+      "reason": "largest 90+ overdue",
+      "amount": 3750000.0,
+      "bucket": "90+"
+    },
+    {
+      "customer": "Acme Corp",
+      "reason": "largest 90+ overdue",
+      "amount": 250000.0,
+      "bucket": "90+"
+    }
   ]
 }

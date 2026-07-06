@@ -35,10 +35,14 @@ def test_state_flows_through_all_nodes(small_xlsx_bytes, small_mapping, as_of: d
     assert not final.get("error")
     assert final["df"] is not None
     assert isinstance(final["quality_flags"], list)
-    assert final["risk_flags"] == []  # Phase-1 stub
+    # Phase 2: the flag node now emits real riskiest-account flags.
+    assert final["risk_flags"] and final["risk_flags"][0].customer == "Beacon & Co"
     assert isinstance(final["metrics"], AgingMetrics)
-    # assemble attached the data-quality report
+    # assemble attached the data-quality report (with the full audit list)
     assert final["metrics"].data_quality.flagged_row_count == 4
+    assert {r.row_index for r in final["metrics"].data_quality.rows} == {14, 15, 16, 17}
+    # Phase-2 breakdowns populated on the metrics object.
+    assert [e.employee for e in final["metrics"].employees] == ["Ravi", "Priya", "(blank)"]
 
 
 def test_error_routes_to_handle_error(as_of: date):

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import random
+import sys
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -28,6 +29,15 @@ AS_OF = date(2026, 1, 15)
 FIXTURE_DIR = Path(__file__).resolve().parent
 
 _EXCEL_EPOCH = date(1899, 12, 30)
+
+# Mirrors the default of ``AGENT_RISK_TOP_N`` in src/config/settings.py WITHOUT
+# importing it — the oracle stays a fully independent pure-Python computation.
+RISK_TOP_N = 5
+
+# The five reportable buckets (``unclassified`` is deliberately excluded — a
+# no-due-date row lands in no bucket, so the five bucket amounts need not sum to
+# a group's total_outstanding).
+_FIVE_BUCKETS = ["current", "0-30", "31-60", "61-90", "90+"]
 
 DEVANAGARI = "श्री एंटरप्राइजेज"  # श्री एंटरप्राइजेज
 
@@ -116,12 +126,69 @@ def _rupees(paise: int) -> float:
     return round(paise / 100, 2)
 
 
+def _oracle_worst_bucket(buckets: dict[str, int], has_overdue: bool) -> str:
+    """Largest overdue bucket, oldest wins ties; ``none`` when no overdue rows."""
+    if not has_overdue:
+        return "none"
+    best = "90+"
+    for b in ["61-90", "31-60", "0-30"]:
+        if buckets[b] > buckets[best]:
+            best = b
+    return best
+
+
+def _oracle_bucket_totals(buckets: dict[str, int]) -> dict[str, float]:
+    return {
+        "current": _rupees(buckets["current"]),
+        "b_0_30": _rupees(buckets["0-30"]),
+        "b_31_60": _rupees(buckets["31-60"]),
+        "b_61_90": _rupees(buckets["61-90"]),
+        "b_90_plus": _rupees(buckets["90+"]),
+    }
+
+
+def _new_group() -> dict:
+    return {
+        "outstanding": 0,
+        "overdue": 0,
+        "wnum": 0,  # sum(paise_i * dpd_i) over overdue rows
+        "count": 0,
+        "overdue_rows": 0,
+        "buckets": {b: 0 for b in _FIVE_BUCKETS},
+    }
+
+
+def _group_records(group: dict[str, dict], sort_key) -> list[dict]:
+    """Emit ordered {key, bucket_totals, weighted_avg_days_overdue, pct_overdue,
+    total_outstanding} records (+ paise variants) for a partition."""
+    records = []
+    for key, g in group.items():
+        wden = g["overdue"]
+        wavg = None if wden == 0 else round(g["wnum"] / wden, 2)
+        records.append(
+            {
+                "key": key,
+                "bucket_totals": _oracle_bucket_totals(g["buckets"]),
+                "bucket_totals_paise": dict(g["buckets"]),
+                "weighted_avg_days_overdue": wavg,
+                "pct_overdue": (g["overdue"] / g["outstanding"]) if g["outstanding"] != 0 else 0.0,
+                "total_outstanding": _rupees(g["outstanding"]),
+                "total_outstanding_paise": g["outstanding"],
+            }
+        )
+    records.sort(key=sort_key)
+    return records
+
+
 def compute_expected(rows: list[dict], as_of: date) -> dict:
     """Dead-simple independent summation over every row."""
     outstanding = 0
     overdue = 0
     bucket_paise = {"current": 0, "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
     per_customer: dict[str, dict[str, int]] = {}
+    per_customer_full: dict[str, dict] = {}
+    per_employee: dict[str, dict] = {}
+    cust_90: dict[str, int] = {}
     flags: list[dict] = []
 
     for idx, r in enumerate(rows):
@@ -129,18 +196,35 @@ def compute_expected(rows: list[dict], as_of: date) -> dict:
         due = r["due_date"]
         dpd = (as_of - due).days if due is not None else None
         bucket = _oracle_bucket(dpd)
+        is_overdue = dpd is not None and dpd > 0
 
         outstanding += p
-        if dpd is not None and dpd > 0:
+        if is_overdue:
             overdue += p
         if bucket in bucket_paise:
             bucket_paise[bucket] += p
 
         cust = r["customer"] if (r["customer"] and str(r["customer"]).strip()) else "(blank)"
+        emp = r["employee"] if (r["employee"] and str(r["employee"]).strip()) else "(blank)"
+
         pc = per_customer.setdefault(cust, {"overdue": 0, "outstanding": 0})
         pc["outstanding"] += p
-        if dpd is not None and dpd > 0:
+        if is_overdue:
             pc["overdue"] += p
+
+        for label, store in ((cust, per_customer_full), (emp, per_employee)):
+            g = store.setdefault(label, _new_group())
+            g["outstanding"] += p
+            g["count"] += 1
+            if bucket in g["buckets"]:
+                g["buckets"][bucket] += p
+            if is_overdue:
+                g["overdue"] += p
+                g["wnum"] += p * dpd
+                g["overdue_rows"] += 1
+
+        if bucket == "90+":
+            cust_90[cust] = cust_90.get(cust, 0) + p
 
         emp_blank = not (r["employee"] and str(r["employee"]).strip())
         cust_blank = not (r["customer"] and str(r["customer"]).strip())
@@ -158,12 +242,7 @@ def compute_expected(rows: list[dict], as_of: date) -> dict:
     has_overdue = any(
         (r["due_date"] is not None and (as_of - r["due_date"]).days > 0) for r in rows
     )
-    worst = "none"
-    if has_overdue:
-        worst = "90+"
-        for b in ["61-90", "31-60", "0-30"]:
-            if bucket_paise[b] > bucket_paise[worst]:
-                worst = b
+    worst = _oracle_worst_bucket(bucket_paise, has_overdue)
 
     ranked = sorted(
         per_customer.items(),
@@ -176,6 +255,38 @@ def compute_expected(rows: list[dict], as_of: date) -> dict:
             "outstanding_amount": _rupees(v["outstanding"]),
         }
         for name, v in ranked[:20]
+    ]
+
+    # Phase-2: employee summary (outstanding desc, overdue desc, employee asc).
+    employees = [
+        {
+            "employee": key,
+            "total_outstanding": _rupees(g["outstanding"]),
+            "total_overdue": _rupees(g["overdue"]),
+            "total_outstanding_paise": g["outstanding"],
+            "total_overdue_paise": g["overdue"],
+            "pct_overdue": (g["overdue"] / g["outstanding"]) if g["outstanding"] != 0 else 0.0,
+            "worst_bucket": _oracle_worst_bucket(g["buckets"], g["overdue_rows"] > 0),
+            "invoice_count": g["count"],
+        }
+        for key, g in sorted(
+            per_employee.items(),
+            key=lambda kv: (-kv[1]["outstanding"], -kv[1]["overdue"], kv[0]),
+        )
+    ]
+
+    # Phase-2: per-group aging breakdowns (outstanding desc, key asc).
+    breakdown_sort = lambda rec: (-rec["total_outstanding_paise"], rec["key"])  # noqa: E731
+    customer_breakdown = _group_records(per_customer_full, breakdown_sort)
+    employee_breakdown = _group_records(per_employee, breakdown_sort)
+
+    # Phase-2: risk flags — customers by 90+ overdue desc, name asc, top N.
+    risk_flags = [
+        {"customer": c, "reason": "largest 90+ overdue", "amount": _rupees(v), "bucket": "90+"}
+        for c, v in sorted(
+            ((c, v) for c, v in cust_90.items() if v != 0),
+            key=lambda kv: (-kv[1], kv[0]),
+        )[:RISK_TOP_N]
     ]
 
     by_reason: dict[str, int] = {}
@@ -211,6 +322,10 @@ def compute_expected(rows: list[dict], as_of: date) -> dict:
             "by_reason": by_reason,
         },
         "flags": flags,
+        "employees": employees,
+        "customer_breakdown": customer_breakdown,
+        "employee_breakdown": employee_breakdown,
+        "risk_flags": risk_flags,
     }
 
 
@@ -379,14 +494,24 @@ def build_summary(path: Path, as_of: date = AS_OF) -> dict:
     return expected
 
 
-def main() -> None:
-    build_small()
+def write_expected_json() -> Path:
+    """(Re)write ``expected_small.json`` from the oracle WITHOUT touching the
+    committed ``ar_small.xlsx`` binary (its rows are unchanged, so rewriting the
+    workbook would only churn the binary)."""
     expected = compute_expected(SMALL_ROWS, AS_OF)
-    (FIXTURE_DIR / "expected_small.json").write_text(
-        json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(f"Wrote {FIXTURE_DIR / 'ar_small.xlsx'}")
-    print(f"Wrote {FIXTURE_DIR / 'expected_small.json'}")
+    out = FIXTURE_DIR / "expected_small.json"
+    out.write_text(json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
+
+
+def main() -> None:
+    json_only = "--json-only" in sys.argv
+    if not json_only:
+        build_small()
+        print(f"Wrote {FIXTURE_DIR / 'ar_small.xlsx'}")
+    out = write_expected_json()
+    expected = compute_expected(SMALL_ROWS, AS_OF)
+    print(f"Wrote {out}")
     print(f"total_outstanding={expected['total_outstanding']} total_overdue={expected['total_overdue']} "
           f"worst_bucket={expected['worst_bucket']} top={expected['top_customers_by_overdue'][0]['customer']}")
     # NOTE: ar_large.xlsx is intentionally NOT written here — it is a multi-MB

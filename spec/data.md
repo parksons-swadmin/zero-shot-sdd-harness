@@ -80,6 +80,8 @@ One parsed invoice after the mapping is applied.
 
 > Phase-1 responses omit or null the Phase-2 fields; the frontend shows labelled stubs for them.
 
+> **`as_of` reference date:** the served/demo path can pin the reference date via the optional `AGENT_AS_OF` env var for reproducibility (lets the bundled demo fixture reproduce the documented dashboard deterministically). Default is `date.today()`; with the var unset, real files always age to today. See [architecture.md](architecture.md) Settings.
+
 ### Value objects
 - `BucketTotals`: `current`, `b_0_30`, `b_31_60`, `b_61_90`, `b_90_plus` — each a ₹ number (from exact paise).
 - `CustomerOverdue`: `customer`, `overdue_amount`, `outstanding_amount`.

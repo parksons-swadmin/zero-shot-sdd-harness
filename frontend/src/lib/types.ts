@@ -64,13 +64,48 @@ export interface TopCustomer {
   outstanding_amount: number
 }
 
+/** A single flagged/unparseable row in the data-quality audit list (Phase 2). */
+/** Same wire shape as ParseFlag — reused verbatim per spec/data.md. */
+export type QualityFlag = ParseFlag
+
 export interface DataQuality {
   flagged_row_count: number
   unparseable_row_count: number
+  /** Counts per reason. MAY include the key "summary_row_excluded" (present only when > 0). */
   by_reason: Record<string, number>
+  /** Full audit list of flagged/unparseable rows (Phase 2; omitted in Phase 1). */
+  rows?: QualityFlag[]
 }
 
-/** Response `data` from POST /api/compute (Phase-1 fields). */
+/** Per-employee summary (Phase 2). Ranked desc by total_outstanding by the backend. */
+export interface EmployeeSummary {
+  employee: string
+  total_outstanding: number
+  total_overdue: number
+  pct_overdue: number
+  worst_bucket: Bucket
+  invoice_count: number
+}
+
+/** Per-group (customer or employee) aging breakdown + weighted-avg days overdue (Phase 2). */
+export interface GroupBreakdown {
+  key: string
+  bucket_totals: BucketTotals
+  /** Amount-weighted mean days-past-due over the group's overdue invoices; null when no overdue. */
+  weighted_avg_days_overdue: number | null
+  pct_overdue: number
+  total_outstanding: number
+}
+
+/** A proactive risk flag on an account (Phase 2). */
+export interface RiskFlag {
+  customer: string
+  reason: string
+  amount: number
+  bucket: string
+}
+
+/** Response `data` from POST /api/compute (Phase-1 fields + Phase-2 extensions). */
 export interface DashboardResult {
   source_filename: string
   sheet_name: string
@@ -84,6 +119,11 @@ export interface DashboardResult {
   bucket_totals: BucketTotals
   top_customers_by_overdue: TopCustomer[]
   data_quality: DataQuality
+  // Phase-2 fields — omitted or null in Phase-1 responses.
+  employees?: EmployeeSummary[]
+  customer_breakdown?: GroupBreakdown[]
+  employee_breakdown?: GroupBreakdown[]
+  risk_flags?: RiskFlag[]
 }
 
 /** The mapping payload sent to /api/compute (canonical field -> source column). */

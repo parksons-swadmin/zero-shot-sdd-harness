@@ -84,6 +84,8 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 
 **Phase 2** additionally populates `employees`, `customer_breakdown`, `employee_breakdown`, `risk_flags`, and `data_quality.rows`. Phase-1 responses omit or null these; the frontend shows labelled stubs.
 
+**Reference date:** `as_of` is `date.today()` unless the server is started with `AGENT_AS_OF` set (a server-level reproducibility override; see [architecture.md](architecture.md) Settings). There is **no per-request `as_of` field** on the API.
+
 **Money on the wire:** ₹ values are JSON numbers already rounded to 2 decimals from exact integer paise (values < 2^53, exact for display). `pct_overdue` is a ratio 0..1. The exactness guarantee is enforced/tested in the backend on integer paise (see [data.md](data.md)).
 
 **Error cases:**

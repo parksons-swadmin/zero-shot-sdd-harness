@@ -56,9 +56,12 @@ def test_data_quality_ties_out(small_xlsx_bytes, small_mapping, expected_small):
     assert dq.by_reason == edq["by_reason"]
 
 
-def test_phase2_fields_absent_in_phase1(small_xlsx_bytes, small_mapping):
+def test_phase2_fields_are_populated(small_xlsx_bytes, small_mapping):
+    """Phase 2 wires these blocks into real features — they are always populated
+    now (superseded detail lives in tests/unit/test_phase2.py)."""
     m = run_analysis(file_bytes=small_xlsx_bytes, sheet_name=None, mapping=small_mapping, as_of=AS_OF)
-    assert m.employees is None
-    assert m.customer_breakdown is None
-    assert m.employee_breakdown is None
-    assert m.risk_flags == []  # flag node ran (stub) -> empty list, not None
+    assert [e.employee for e in m.employees] == ["Ravi", "Priya", "(blank)"]
+    assert len(m.customer_breakdown) == 5
+    assert len(m.employee_breakdown) == 3
+    assert m.risk_flags and m.risk_flags[0].customer == "Beacon & Co"
+    assert {r.row_index for r in m.data_quality.rows} == {14, 15, 16, 17}

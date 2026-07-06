@@ -44,7 +44,7 @@ In-memory pandas DataFrame  →  AgingMetrics (JSON)  →  discarded at end of r
 1. **Trigger:** user selects a `.xlsx` in the browser.
 2. `POST /api/preview` → read workbook (openpyxl/pandas) → `detect_mapping` (rapidfuzz) → return sheets, columns, proposed mapping (with confidence tiers), 10-row preview, parse-time flags. **Server keeps nothing.**
 3. User reviews/corrects the mapping and clicks Confirm (human-in-the-loop checkpoint).
-4. `POST /api/compute` (same file bytes + confirmed mapping) → runner builds `AnalysisState` (`as_of = date.today()`) → invoke the deterministic graph → `AgingMetrics` / `DashboardResult`.
+4. `POST /api/compute` (same file bytes + confirmed mapping) → runner builds `AnalysisState` (`as_of = date.today()`) → invoke the deterministic graph → `AgingMetrics` / `DashboardResult`. The aging reference date resolves by precedence **explicit `as_of` param (tests) > `AGENT_AS_OF` (optional reproducibility override) > `date.today()` (default)**; real uploads with the var unset always age to today.
 5. **Output:** JSON `DashboardResult` → KPI tiles + Top-20 chart (Phase 1) → later phases add employee summary, breakdowns, flags, exports. File and DataFrame are discarded.
 
 ## Statelessness & the mapping round-trip
@@ -117,6 +117,7 @@ Rewritten to drop all provider/DB keys. Fields (all optional, sensible defaults)
 | `AGENT_MAX_ROWS` | `200000` | Row-count cap |
 | `AGENT_HEADER_MATCH_THRESHOLD` | `85` | rapidfuzz high-confidence cutoff |
 | `AGENT_RISK_TOP_N` | `5` | Riskiest-accounts count (Phase 2) |
+| `AGENT_AS_OF` | (unset → today) | Optional reproducibility override for the aging reference date; when unset, the pipeline uses `date.today()`. Used to reproduce the bundled demo/tests deterministically. |
 | `PORT` | `8001` | Server port |
 
 **`.env` needs NO API keys.** `.env.example` is rewritten to contain only the above (with defaults) — no provider or database entries.
