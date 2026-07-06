@@ -1,54 +1,48 @@
-"""Settings + provider auto-detection — no LLM key required."""
-import pytest
-import os
+"""Settings — no provider/DB keys; AGENT_ prefix; sensible defaults."""
 
 
-def test_auto_detects_anthropic(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGENT_ANTHROPIC_API_KEY", "sk-ant-fake")
-    monkeypatch.setenv("AGENT_GEMINI_API_KEY", "")
-    monkeypatch.setenv("AGENT_LLM_PROVIDER", "")
-    monkeypatch.setenv("AGENT_DATABASE_URL", f"sqlite:///{tmp_path}/t.db")
-
+def test_defaults(monkeypatch):
+    for var in (
+        "AGENT_LOG_LEVEL",
+        "AGENT_MAX_UPLOAD_MB",
+        "AGENT_MAX_ROWS",
+        "AGENT_HEADER_MATCH_THRESHOLD",
+        "AGENT_RISK_TOP_N",
+        "AGENT_DRILLDOWN_MAX_ROWS",
+        "AGENT_AS_OF",
+    ):
+        monkeypatch.delenv(var, raising=False)
     import config.settings as m
+
     m._settings = None
     s = m.get_settings()
-    assert s.anthropic_api_key == "sk-ant-fake"
-    assert s.gemini_api_key == ""
+    assert s.log_level == "INFO"
+    assert s.max_upload_mb == 25
+    assert s.max_rows == 200000
+    assert s.header_match_threshold == 85
+    assert s.risk_top_n == 5
+    # Phase-4 drill-down page cap (matches spec/architecture.md Settings).
+    assert s.drilldown_max_rows == 1000
+    # Optional reproducibility override defaults to None (=> behavior is date.today()).
+    assert s.as_of is None
 
 
-def test_auto_detects_gemini(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGENT_ANTHROPIC_API_KEY", "")
-    monkeypatch.setenv("AGENT_GEMINI_API_KEY", "AIza-fake")
-    monkeypatch.setenv("AGENT_LLM_PROVIDER", "")
-    monkeypatch.setenv("AGENT_DATABASE_URL", f"sqlite:///{tmp_path}/t.db")
-
+def test_env_override(monkeypatch):
+    monkeypatch.setenv("AGENT_HEADER_MATCH_THRESHOLD", "90")
+    monkeypatch.setenv("AGENT_MAX_ROWS", "500")
+    monkeypatch.setenv("AGENT_DRILLDOWN_MAX_ROWS", "250")
     import config.settings as m
+
     m._settings = None
     s = m.get_settings()
-    assert s.gemini_api_key == "AIza-fake"
+    assert s.header_match_threshold == 90
+    assert s.max_rows == 500
+    assert s.drilldown_max_rows == 250
 
 
-def test_provider_raises_with_no_key(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGENT_ANTHROPIC_API_KEY", "")
-    monkeypatch.setenv("AGENT_GEMINI_API_KEY", "")
-    monkeypatch.setenv("AGENT_LLM_PROVIDER", "")
-    monkeypatch.setenv("AGENT_DATABASE_URL", f"sqlite:///{tmp_path}/t.db")
+def test_no_provider_or_db_fields():
+    from config.settings import Settings
 
-    import config.settings as m
-    m._settings = None
-
-    from llm.client import _make_provider
-    with pytest.raises(RuntimeError, match="No LLM provider configured"):
-        _make_provider()
-
-
-def test_explicit_provider_wins(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGENT_ANTHROPIC_API_KEY", "sk-ant-fake")
-    monkeypatch.setenv("AGENT_GEMINI_API_KEY", "AIza-fake")
-    monkeypatch.setenv("AGENT_LLM_PROVIDER", "gemini")
-    monkeypatch.setenv("AGENT_DATABASE_URL", f"sqlite:///{tmp_path}/t.db")
-
-    import config.settings as m
-    m._settings = None
-    s = m.get_settings()
-    assert s.llm_provider == "gemini"
+    fields = set(Settings.model_fields)
+    for forbidden in ("database_url", "anthropic_api_key", "gemini_api_key", "llm_provider", "llm_model"):
+        assert forbidden not in fields, f"{forbidden} must not exist on the no-LLM/no-DB Settings"

@@ -4,7 +4,7 @@ agent.py — verify local setup or run the agent
 
 Usage:
   python agent.py        # verify all tools, .env, deps, and tests
-  python agent.py --run  # verify + apply migrations + build frontend + start server
+  python agent.py --run  # verify + build frontend + start server
 """
 import argparse
 import os
@@ -49,15 +49,6 @@ def which(name: str) -> bool:
 def cmd_version(cmd: list[str]) -> str | None:
     r = run(cmd)
     return r.stdout.strip().splitlines()[0] if r.returncode == 0 else None
-
-def env_key_set(path: Path, key: str) -> bool:
-    if not path.exists():
-        return False
-    for line in path.read_text().splitlines():
-        if line.startswith(f"{key}="):
-            val = line.split("=", 1)[1].strip()
-            return bool(val) and val != "#"
-    return False
 
 
 # ── checks ────────────────────────────────────────────────────────────────────
@@ -105,22 +96,13 @@ def check_tools() -> None:
 def check_env() -> None:
     header("Environment (.env)")
 
+    # This tool is fully local: no API keys, no database. .env is optional
+    # (all settings have defaults); it needs no provider or database entries.
     env = ROOT / ".env"
-    if not env.exists():
-        _cp = "copy" if sys.platform == "win32" else "cp"
-        fail(f".env not found — run: {_cp} .env.example .env  and fill in your API key")
-        return
-    ok(".env exists")
-
-    providers = {
-        "AGENT_ANTHROPIC_API_KEY": "Anthropic",
-        "AGENT_GEMINI_API_KEY":    "Gemini",
-    }
-    found = [name for key, name in providers.items() if env_key_set(env, key)]
-    if found:
-        ok(f"API key set: {', '.join(found)}")
+    if env.exists():
+        ok(".env present (optional — no API keys required)")
     else:
-        fail("No provider key found in .env — set AGENT_ANTHROPIC_API_KEY or AGENT_GEMINI_API_KEY")
+        ok("no .env needed — defaults apply (no API keys, no database)")
 
 
 def check_python_env() -> None:
@@ -131,26 +113,11 @@ def check_python_env() -> None:
         return
     ok(".venv present")
 
-    r = run(["uv", "run", "python", "-c", "import fastapi, sqlalchemy, langgraph, anthropic"])
+    r = run(["uv", "run", "python", "-c", "import fastapi, langgraph, pandas, openpyxl, rapidfuzz"])
     if r.returncode == 0:
-        ok("core packages importable (fastapi, sqlalchemy, langgraph, anthropic)")
+        ok("core packages importable (fastapi, langgraph, pandas, openpyxl, rapidfuzz)")
     else:
         fail("missing packages — run: uv sync")
-
-
-def check_db() -> None:
-    header("Database")
-
-    (ROOT / "data").mkdir(exist_ok=True)
-    ok("data/ directory ready")
-
-    r = run(["uv", "run", "alembic", "current"])
-    if r.returncode == 0 and r.stdout.strip():
-        ok(f"alembic migration applied: {r.stdout.strip().splitlines()[0]}")
-    elif r.returncode == 0:
-        warn("no migration applied yet — will apply on next run")
-    else:
-        warn("alembic check failed — will attempt on next run")
 
 
 def check_tests() -> None:
@@ -185,15 +152,7 @@ def check_frontend() -> None:
 
 # ── run ───────────────────────────────────────────────────────────────────────
 def do_run() -> None:
-    # ensure data dir exists before alembic tries to open the sqlite file
-    (ROOT / "data").mkdir(exist_ok=True)
-
-    # migrations
-    info("applying migrations...")
-    r = run(["uv", "run", "alembic", "upgrade", "head"], capture=False)
-    if r.returncode != 0:
-        print(f"\n{RED}alembic upgrade failed — fix before running.{RESET}")
-        sys.exit(1)
+    # No database and no migrations — the tool is stateless.
 
     # frontend build
     fe = ROOT / "frontend"
@@ -225,7 +184,6 @@ def do_check() -> None:
     check_tools()
     check_env()
     check_python_env()
-    check_db()
     check_tests()
     check_frontend()
     print()
@@ -240,7 +198,7 @@ def do_check() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Verify local setup or run the agent")
-    parser.add_argument("--run", action="store_true", help="apply migrations, build frontend, and start server")
+    parser.add_argument("--run", action="store_true", help="build frontend and start server")
     args = parser.parse_args()
 
     if args.run:

@@ -16,3 +16,12 @@ build/
 *.db-shm
 *.db-wal
 data/
+
+# The >=60k-row fixture is a multi-MB binary rebuilt into a tmp path per test
+# session (tests/conftest.py) — never commit it.
+tests/fixtures/ar_large.xlsx
+tests/fixtures/expected_large.json
+
+# User-supplied REAL AR data — confidential customer names/balances. NEVER commit.
+tests/fixtures/AR 2nd July 2026.xlsx
+tests/fixtures/*real*.xlsx
