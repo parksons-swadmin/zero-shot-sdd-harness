@@ -134,6 +134,16 @@ export interface DashboardResult {
 }
 
 /**
+ * Live progress emitted by POST /api/compute/stream while a (large) file is parsed
+ * and aggregated. `rows_total` is the true row count; `rows_done` climbs toward it.
+ */
+export interface ComputeProgress {
+  phase: string
+  rows_done: number
+  rows_total: number
+}
+
+/**
  * The mapping payload sent to /api/compute (canonical field -> source column).
  * The six canonical fields are always required strings; `hod` is an OPTIONAL
  * seventh field (Head of Department) that never gates Confirm & Compute and is

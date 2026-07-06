@@ -1,0 +1,64 @@
+/*
+ * Print / Save-as-PDF stylesheet (Phase 3 — pdf_export capability).
+ * Imported after globals.css in layout.tsx. Plain authored CSS (no Tailwind
+ * directives) so it is emitted verbatim; it must NOT touch the
+ * `@import "tailwindcss"; @source "../"` ordering in globals.css.
+ *
+ * Strategy:
+ *   HIDE on paper  — interactive chrome (Export/Print bar, "Start over", the
+ *                    streamed progress bar, the "Show all" table toggles, and any
+ *                    upload/mapping controls). Marked with `.no-print` where the
+ *                    element is owned by this slice; targeted by data-testid where
+ *                    the element lives in a Phase-2 component.
+ *   KEEP on paper  — the dashboard header (source file + as_of + row count), KPI
+ *                    tiles, Top-20 chart, employee/breakdown/flags tables. These
+ *                    carry no `.no-print` class, so they print normally.
+ */
+
+/* Utility hook: applied to chrome elements owned by the Phase-3 slice. */
+.no-print {
+  /* no-op on screen */
+}
+
+@media print {
+  /* --- Page geometry --- */
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  /* Flatten the app background/spacing so the report reads cleanly on paper. */
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  /* Keep chart fills and coloured badges/amounts in the printed output. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* --- HIDE interactive chrome on paper --- */
+  .no-print,
+  [data-testid='export-bar'],
+  [data-testid='progress-bar'],
+  [data-testid='customer-breakdown-toggle'],
+  [data-testid='data-quality-toggle'],
+  input[type='file'] {
+    display: none !important;
+  }
+
+  /* Avoid awkward page breaks through a card/table/chart. */
+  section,
+  table,
+  .recharts-wrapper {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Drop heavy shadows/borders that waste toner without adding meaning. */
+  .shadow-sm {
+    box-shadow: none !important;
+  }
+}

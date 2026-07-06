@@ -6,12 +6,19 @@ a genuine tie-out, not a tautology.
 
 - ``ar_small.xlsx`` + ``expected_small.json`` are committed (they drive the API
   integration test, the Playwright E2E, and the user handoff).
-- ``ar_large.xlsx`` (>= 60,000 rows) is NOT committed — it is built into a tmp
-  path by a session-scoped pytest fixture (see ``tests/conftest.py``).
+- ``ar_large.xlsx`` (>= 60,000 rows) is NOT committed (it is gitignored) — the
+  unit/integration suites build it into a tmp path via a session-scoped pytest
+  fixture (see ``tests/conftest.py``), but the Phase-3 frontend Playwright E2E
+  uploads the on-disk ``tests/fixtures/ar_large.xlsx``. Regenerate it on disk
+  (same seeded generator the conftest fixture uses) with the ``--large`` flag.
 
 Run directly to (re)generate the committed small fixture:
 
     uv run python tests/fixtures/build_fixtures.py
+
+Regenerate the (gitignored) >=60,000-row large fixture on disk for the E2E:
+
+    uv run python tests/fixtures/build_fixtures.py --large
 """
 
 from __future__ import annotations
@@ -504,7 +511,33 @@ def write_expected_json() -> Path:
     return out
 
 
+def build_large_fixture(path: Path | None = None, n: int = 60000, seed: int = 12345) -> Path:
+    """(Re)generate the >=60,000-row ``ar_large.xlsx`` on disk + its oracle JSON.
+
+    Uses the SAME seeded generator (``build_large`` -> ``build_large_rows``) the
+    session-scoped ``large_fixture`` conftest fixture uses, so the on-disk file is
+    identical to the one the unit/integration suites build in a tmp path. Both
+    outputs are gitignored — never commit them.
+    """
+    path = path or (FIXTURE_DIR / "ar_large.xlsx")
+    expected = build_large(path, n=n, seed=seed)
+    (FIXTURE_DIR / "expected_large.json").write_text(
+        json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return path
+
+
 def main() -> None:
+    # --large regenerates ONLY the gitignored large fixture on disk (for the
+    # Phase-3 frontend E2E). It is a multi-MB binary and must never be committed.
+    if "--large" in sys.argv:
+        path = build_large_fixture()
+        expected = compute_expected(build_large_rows(), AS_OF)
+        print(f"Wrote {path} ({expected['row_count']} rows) and expected_large.json")
+        print(f"total_outstanding_paise={expected['total_outstanding_paise']} "
+              f"top={expected['top_customers_by_overdue'][0]['customer']}")
+        return
+
     json_only = "--json-only" in sys.argv
     if not json_only:
         build_small()
@@ -514,9 +547,9 @@ def main() -> None:
     print(f"Wrote {out}")
     print(f"total_outstanding={expected['total_outstanding']} total_overdue={expected['total_overdue']} "
           f"worst_bucket={expected['worst_bucket']} top={expected['top_customers_by_overdue'][0]['customer']}")
-    # NOTE: ar_large.xlsx is intentionally NOT written here — it is a multi-MB
-    # binary rebuilt into a tmp path per test session (see tests/conftest.py) and
-    # must never be committed. Use build_large(path) directly if you need a copy.
+    # NOTE: ar_large.xlsx is intentionally NOT written by the default run — it is
+    # a multi-MB binary rebuilt into a tmp path per test session (see
+    # tests/conftest.py). Use `--large` to (re)generate it on disk for the E2E.
 
 
 if __name__ == "__main__":

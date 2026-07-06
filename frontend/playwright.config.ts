@@ -18,6 +18,8 @@ const BASE_URL = `http://localhost:${E2E_PORT}/app/`
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // Ensures the gitignored >=60k-row ar_large.xlsx fixture exists before the run.
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

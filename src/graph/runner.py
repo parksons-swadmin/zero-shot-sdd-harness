@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime
 
 import pandas as pd
@@ -20,9 +21,17 @@ from domain.mapping import ColumnMapping, PreviewResult
 from graph.agent import agentic_ai
 from graph.state import AnalysisState
 from observability.events import get_logger
+from tools.flags import compute_risk_flags
 from tools.header_detect import CANONICAL_FIELDS, detect_mapping
 from tools.ingest import normalize, read_workbook
+from tools.metrics import build_data_quality_report, compute_metrics
 from tools.validate import validate
+
+# Coarse progress increment: emit a "rows_done" frame roughly every this many
+# rows so the client bar advances without event flooding (large_file_progress).
+_PROGRESS_CHUNK = 5000
+
+ProgressFn = Callable[[str, int, int], None]
 
 _log = get_logger("runner")
 
@@ -180,4 +189,84 @@ def run_analysis(
 
     metrics = final["metrics"]
     _log.info("run.complete", run_id=run_id, row_count=metrics.row_count)
+    return metrics
+
+
+def _normalize_streaming(
+    raw_df: pd.DataFrame,
+    mapping: ColumnMapping,
+    as_of: date,
+    progress: ProgressFn,
+    chunk_size: int = _PROGRESS_CHUNK,
+) -> pd.DataFrame:
+    """Normalize the full frame in row-chunks, emitting REAL ``parse`` progress.
+
+    Each chunk is a genuine ``normalize`` call over real rows (honest progress —
+    never a timer). ``normalize`` is purely row-local, so chunking + concatenating
+    yields a frame byte-identical to normalizing the whole frame at once — EXCEPT
+    that ``normalize`` numbers ``row_index`` as ``range(len(chunk))`` per call, so
+    each chunk's ``row_index`` MUST be re-offset to its global start (the
+    data-quality audit + risk flags are keyed by ``row_index``; a wrong offset
+    would diverge from the non-streaming path). The equivalence test is the
+    mandatory safety net for this invariant.
+    """
+    rows_total = len(raw_df)
+    if rows_total == 0:
+        return normalize(raw_df, mapping, as_of)
+
+    parts: list[pd.DataFrame] = []
+    for start in range(0, rows_total, chunk_size):
+        end = min(start + chunk_size, rows_total)
+        chunk = normalize(raw_df.iloc[start:end], mapping, as_of)
+        # Re-offset row_index from per-chunk 0..n to the global start..end.
+        chunk["row_index"] = list(range(start, end))
+        parts.append(chunk)
+        progress("parse", end, rows_total)
+
+    df = pd.concat(parts, ignore_index=True)
+    return df
+
+
+def run_analysis_streaming(
+    *,
+    file_bytes: bytes,
+    sheet_name: str | None,
+    mapping: ColumnMapping,
+    as_of: date | None = None,
+    progress: ProgressFn,
+    chunk_size: int = _PROGRESS_CHUNK,
+) -> AgingMetrics:
+    """Run the deterministic pipeline while emitting real row-count progress.
+
+    Produces the IDENTICAL ``AgingMetrics`` as :func:`run_analysis` for the same
+    inputs — it runs the same downstream steps the graph nodes run (exclude
+    summary rows -> validate -> compute_metrics -> compute_risk_flags ->
+    build_data_quality_report/assemble), differing only in that ``normalize`` is
+    driven in chunks so ``progress(phase, rows_done, rows_total)`` reflects real
+    rows processed. Structural failures raise ``PipelineError`` (rendered by the
+    route as an SSE ``error`` frame).
+    """
+    as_of = as_of or get_settings().as_of or date.today()
+    raw_df, _ = _read_or_raise(file_bytes, sheet_name)
+    _validate_mapping(mapping, [str(c) for c in raw_df.columns])
+
+    rows_total = int(len(raw_df))
+    run_id = str(uuid.uuid4())
+    _log.info("stream.start", run_id=run_id, rows=rows_total)
+
+    df = _normalize_streaming(raw_df, mapping, as_of, progress, chunk_size)
+
+    # Identical downstream to node_ingest -> ... -> node_assemble.
+    summary_excluded = int(df["is_summary"].sum())
+    df = df[~df["is_summary"]].drop(columns=["is_summary"]).reset_index(drop=True)
+
+    flags = validate(df)
+    metrics = compute_metrics(df, as_of, 1, summary_row_excluded=summary_excluded)
+    metrics.risk_flags = compute_risk_flags(df)
+    metrics.data_quality = build_data_quality_report(
+        df, flags, summary_row_excluded=summary_excluded
+    )
+
+    progress("compute", metrics.row_count, metrics.row_count)
+    _log.info("stream.complete", run_id=run_id, row_count=metrics.row_count)
     return metrics

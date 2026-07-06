@@ -8,12 +8,14 @@ import TopCustomersChart from './components/TopCustomersChart'
 import EmployeeTable from './components/EmployeeTable'
 import AgingBreakdown from './components/AgingBreakdown'
 import FlagsPanel from './components/FlagsPanel'
-import Stubs from './components/Stubs'
-import { postCompute, postPreview } from '@/lib/api'
+import ExportBar from './components/ExportBar'
+import ProgressBar from './components/ProgressBar'
+import { computeStream, postCompute, postPreview } from '@/lib/api'
 import { intFmt } from '@/lib/format'
 import {
   CANONICAL_FIELDS,
   type CanonicalField,
+  type ComputeProgress,
   type DashboardResult,
   type Mapping,
   type PreviewData,
@@ -40,6 +42,7 @@ export default function Home() {
 
   const [previewing, setPreviewing] = useState(false)
   const [computing, setComputing] = useState(false)
+  const [progress, setProgress] = useState<ComputeProgress | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [computeError, setComputeError] = useState<string | null>(null)
 
@@ -86,14 +89,25 @@ export default function Home() {
     if (!file) return
     setComputing(true)
     setComputeError(null)
+    // Show the progress bar immediately; the streamed frames fill in real row counts.
+    setProgress({ phase: 'starting', rows_done: 0, rows_total: 0 })
     try {
-      const data = await postCompute(file, mapping, sheetName)
+      let data: DashboardResult
+      try {
+        // Preferred path: SSE stream with live progress for large files.
+        data = await computeStream(file, mapping, sheetName, (p) => setProgress(p))
+      } catch {
+        // Stream unavailable / failed for any reason → fall back to the plain
+        // non-streaming compute so the dashboard still renders (no progress bar).
+        data = await postCompute(file, mapping, sheetName)
+      }
       setResult(data)
       setStep('dashboard')
     } catch (e) {
       setComputeError(e instanceof Error ? e.message : 'Could not compute the metrics.')
     } finally {
       setComputing(false)
+      setProgress(null)
     }
   }, [file, mapping, sheetName])
 
@@ -108,6 +122,7 @@ export default function Home() {
     setComputeError(null)
     setPreviewing(false)
     setComputing(false)
+    setProgress(null)
   }, [])
 
   return (
@@ -121,6 +136,12 @@ export default function Home() {
       </header>
 
       <div className="mx-auto max-w-6xl">
+        {progress && (
+          <div className="mx-auto mb-8 max-w-2xl">
+            <ProgressBar progress={progress} />
+          </div>
+        )}
+
         {step === 'upload' && (
           <Upload
             onFileSelected={onFileSelected}
@@ -154,16 +175,21 @@ export default function Home() {
                 <p className="mt-1 text-sm text-slate-500">
                   Sheet <span className="font-medium text-slate-700">{result.sheet_name}</span> · as
                   of <span className="font-medium text-slate-700">{result.as_of}</span> ·{' '}
-                  {intFmt(result.row_count)} rows
+                  <span data-testid="dashboard-rowcount" className="font-medium text-slate-700">
+                    {intFmt(result.row_count)} rows
+                  </span>
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={startOver}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-              >
-                Start over
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <ExportBar file={file!} mapping={mapping} sheetName={sheetName} />
+                <button
+                  type="button"
+                  onClick={startOver}
+                  className="no-print rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                >
+                  Start over
+                </button>
+              </div>
             </div>
 
             <KpiTiles result={result} />
@@ -181,8 +207,6 @@ export default function Home() {
             />
 
             <FlagsPanel riskFlags={result.risk_flags ?? []} dataQuality={result.data_quality} />
-
-            <Stubs />
           </div>
         )}
       </div>
