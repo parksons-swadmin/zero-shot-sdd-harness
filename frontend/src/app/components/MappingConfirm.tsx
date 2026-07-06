@@ -16,7 +16,7 @@ interface MappingConfirmProps {
   sheetName: string
   onSheetChange: (sheet: string) => void
   mapping: Mapping
-  onMappingChange: (field: CanonicalField, column: string) => void
+  onMappingChange: (field: CanonicalField | 'hod', column: string) => void
   onConfirm: () => void
   computing: boolean
   error: string | null
@@ -66,7 +66,11 @@ export default function MappingConfirm({
 }: MappingConfirmProps) {
   const detectedStatus = useMemo(() => {
     const m = new Map<CanonicalField, MatchStatus>()
-    for (const fm of preview.proposed_mapping) m.set(fm.field, fm.status)
+    for (const fm of preview.proposed_mapping) {
+      // `hod` is optional and mapped separately — the six-field status map ignores it.
+      if (fm.field === 'hod') continue
+      m.set(fm.field, fm.status)
+    }
     return m
   }, [preview.proposed_mapping])
 
@@ -192,6 +196,39 @@ export default function MappingConfirm({
                 </tr>
               )
             })}
+
+            {/* OPTIONAL HoD (Head of Department) — never gates Confirm & Compute. */}
+            <tr data-testid="hod-mapping-row">
+              <td className="px-4 py-3">
+                <label htmlFor="map-hod" className="font-medium text-slate-800">
+                  HoD Name <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+              </td>
+              <td className="px-4 py-3">
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                  Optional
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <select
+                  id="map-hod"
+                  value={mapping.hod ?? ''}
+                  disabled={computing}
+                  onChange={(e) => onMappingChange('hod', e.target.value)}
+                  className="w-full max-w-xs rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:opacity-50"
+                >
+                  <option value="">— none —</option>
+                  {preview.columns.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Adds a Head-of-Department column to the employee summary. Leave as “none” to skip.
+                </p>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>

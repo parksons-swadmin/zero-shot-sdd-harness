@@ -25,6 +25,8 @@ function buildMapping(preview: PreviewData): Mapping {
   const byField = new Map(preview.proposed_mapping.map((fm) => [fm.field, fm.matched_column]))
   const m = {} as Mapping
   for (const f of CANONICAL_FIELDS) m[f] = byField.get(f) ?? ''
+  // OPTIONAL hod — pre-select the backend's proposed column when it matched one.
+  m.hod = byField.get('hod') ?? ''
   return m
 }
 
@@ -76,7 +78,7 @@ export default function Home() {
     [file, runPreview],
   )
 
-  const onMappingChange = useCallback((field: CanonicalField, column: string) => {
+  const onMappingChange = useCallback((field: CanonicalField | 'hod', column: string) => {
     setMapping((prev) => ({ ...prev, [field]: column }))
   }, [])
 

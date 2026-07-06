@@ -43,7 +43,14 @@ export async function postCompute(
   const fd = new FormData()
   fd.append('file', file)
   if (sheetName) fd.append('sheet_name', sheetName)
-  fd.append('mapping', JSON.stringify(mapping))
+
+  // The six canonical fields are always sent. `hod` is optional: include it only
+  // when the user actually picked a column (a blank hod would otherwise be sent as
+  // an empty string). This keeps the payload clean and the field non-gating.
+  const { hod, ...required } = mapping
+  const payload: Record<string, string> = { ...required }
+  if (hod) payload.hod = hod
+  fd.append('mapping', JSON.stringify(payload))
 
   let res: Response
   try {

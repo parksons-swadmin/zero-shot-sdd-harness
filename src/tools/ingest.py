@@ -169,11 +169,16 @@ def normalize(df: pd.DataFrame, mapping: ColumnMapping, as_of: date) -> pd.DataF
     """Apply the confirmed mapping and produce the canonical invoice frame.
 
     Output columns: ``row_index, customer, invoice_no, invoice_date, due_date,
-    amount_paise, amount_valid, employee, dpd, bucket, is_summary`` plus
+    amount_paise, amount_valid, employee, hod, dpd, bucket, is_summary`` plus
     ``raw_*`` columns (original source values, used only to populate quality-flag
     ``raw_value``). Rows are never dropped here; the ``is_summary`` flag marks
     embedded grand-total / summary rows so the pipeline can exclude them from
     aggregation without silently discarding data.
+
+    ``hod`` is the OPTIONAL Head-of-Department text column: when ``mapping.hod``
+    is set it holds the cleaned per-row value (``None`` when the source cell is
+    blank); when ``mapping.hod`` is unmapped the column is present but all-None
+    so downstream code can reference it uniformly. Rows are never dropped for it.
     """
     m = mapping.as_dict()
     raw_customer = df[m["customer"]]
@@ -192,6 +197,13 @@ def normalize(df: pd.DataFrame, mapping: ColumnMapping, as_of: date) -> pd.DataF
     out["customer"] = customer_vals
     out["employee"] = employee_vals
     out["invoice_no"] = invoice_vals
+
+    # Optional HoD text (blank -> None). Present as all-None when unmapped so
+    # metrics can reference ``df["hod"]`` uniformly without a KeyError. Built as
+    # an explicit object Series so None is preserved (a plain list assign would
+    # coerce None -> NaN, and str(NaN) == "nan" would pollute the HoD counts).
+    hod_vals = [_optional_text(v) for v in df[mapping.hod]] if mapping.hod else [None] * n
+    out["hod"] = pd.Series(hod_vals, dtype=object)
 
     out["invoice_date"] = [_parse_date(v) for v in raw_invoice_date]
     due_dates = [_parse_date(v) for v in raw_due_date]

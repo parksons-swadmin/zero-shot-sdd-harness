@@ -49,6 +49,9 @@ export default function EmployeeTable({ employees, employeeBreakdown }: Employee
                 <th scope="col" className="px-4 py-3 font-semibold">
                   Employee
                 </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  HoD Name
+                </th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">
                   Outstanding
                 </th>
@@ -78,6 +81,9 @@ export default function EmployeeTable({ employees, employeeBreakdown }: Employee
                         e.employee
                       )}
                     </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {e.hod ? e.hod : <span className="text-slate-400">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-right tabular-nums text-slate-900">
                       {inr(e.total_outstanding)}
                     </td>
@@ -97,7 +103,7 @@ export default function EmployeeTable({ employees, employeeBreakdown }: Employee
             </tbody>
             <tfoot className="border-t border-slate-200 bg-slate-50 text-xs text-slate-500">
               <tr>
-                <td colSpan={6} className="px-4 py-2">
+                <td colSpan={7} className="px-4 py-2">
                   {intFmt(employees.length)} employee{employees.length === 1 ? '' : 's'} · ranked by
                   outstanding
                 </td>

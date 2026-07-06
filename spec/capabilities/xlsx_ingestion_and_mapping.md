@@ -23,6 +23,8 @@ The six **canonical fields** every AR file must map to:
 | `amount` | Outstanding balance for the row | amount, balance, outstanding, amt, net amount, due amount, pending |
 | `employee` | Salesperson / responsible employee | employee, salesperson, sales person, executive, rep, owner, marketing person |
 
+> **Optional 7th field — `hod` (HoD Name = Head of Department, the salesperson's manager).** Auto-detected by the same fuzzy match against synonym seeds (`hod`, `head of department`, `department head`, `reporting manager`). (The bare `hod name` seed is intentionally excluded: its `name` token false-matches `Payer Name` / `Cust Name`; real HoD headers still match strongly via the seeds above.) It is **strictly optional**: it is confirmable/correctable on the mapping screen, low-confidence is fine, and it **never blocks Compute** whether matched, unmatched, or left unmapped. It is **NOT** one of the six required canonical fields — the six above remain required and unchanged. When present it is carried through normalization and surfaced on the employee summary (see [employee_summary.md](employee_summary.md)); when absent everything works exactly as before.
+
 ## Outputs
 | Output | Type | Destination |
 |--------|------|-------------|

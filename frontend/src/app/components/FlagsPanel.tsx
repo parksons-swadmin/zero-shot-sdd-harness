@@ -7,6 +7,7 @@
 //     rows (nothing is dropped silently). An explicit empty state when there are none.
 //     User-feedback item: when by_reason["summary_row_excluded"] > 0, show a visible note.
 
+import { useState } from 'react'
 import { inr, intFmt, bucketLabel } from '@/lib/format'
 import type { DataQuality, RiskFlag } from '@/lib/types'
 
@@ -14,6 +15,15 @@ interface FlagsPanelProps {
   riskFlags: RiskFlag[]
   dataQuality: DataQuality
 }
+
+// The data-quality audit list renders one <tr> per flagged/unparseable row. On a
+// real export the audit list runs to ~2,900 rows (~15k DOM nodes) and committing
+// them in one synchronous pass freezes the main thread for seconds — which also
+// leaves the Recharts charts above measuring a stale/zero size (perceived as blank
+// charts painting late). Capping to the first N keeps the render fast; a "Show all"
+// control still exposes every row on demand. Mirrors the per-customer table cap in
+// AgingBreakdown.tsx.
+const DEFAULT_VISIBLE = 50
 
 const FIELD_WORDS: Record<string, string> = {
   customer: 'customer',
@@ -35,8 +45,14 @@ function fieldWord(field: string): string {
 }
 
 export default function FlagsPanel({ riskFlags, dataQuality }: FlagsPanelProps) {
+  const [showAllRows, setShowAllRows] = useState(false)
   const rows = dataQuality.rows ?? []
   const summaryExcluded = dataQuality.by_reason?.summary_row_excluded ?? 0
+
+  // Cap the audit list to the first N by default (keeps the real-file render fast).
+  const rowsTotal = rows.length
+  const rowsCapped = rowsTotal > DEFAULT_VISIBLE
+  const visibleRows = showAllRows ? rows : rows.slice(0, DEFAULT_VISIBLE)
 
   // Per-reason counts, excluding the summary-row marker (surfaced separately as a note).
   const reasonCounts = Object.entries(dataQuality.by_reason ?? {}).filter(
@@ -132,46 +148,69 @@ export default function FlagsPanel({ riskFlags, dataQuality }: FlagsPanelProps) 
             No data-quality issues found — every row parsed cleanly.
           </p>
         ) : (
-          <div
-            data-testid="data-quality-list"
-            className="overflow-x-auto rounded-xl border border-slate-200"
-          >
-            <table className="min-w-full text-left text-sm">
-              <caption className="sr-only">Audit list of flagged and unparseable rows</caption>
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th scope="col" className="px-4 py-3 font-semibold">
-                    Row #
-                  </th>
-                  <th scope="col" className="px-4 py-3 font-semibold">
-                    Field
-                  </th>
-                  <th scope="col" className="px-4 py-3 font-semibold">
-                    Reason
-                  </th>
-                  <th scope="col" className="px-4 py-3 font-semibold">
-                    Raw value
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r, i) => (
-                  <tr key={`${r.row_index}-${r.field}-${i}`}>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">{r.row_index}</td>
-                    <td className="px-4 py-3 text-slate-700">{fieldWord(r.field)}</td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                        {humanize(r.reason)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {r.raw_value === '' || r.raw_value == null ? '—' : r.raw_value}
-                    </td>
+          <>
+            {rowsCapped && (
+              <p
+                className="mb-2 text-xs text-slate-500"
+                data-testid="data-quality-count"
+              >
+                Showing first {intFmt(visibleRows.length)} of {intFmt(rowsTotal)} rows
+              </p>
+            )}
+            <div
+              data-testid="data-quality-list"
+              className="overflow-x-auto rounded-xl border border-slate-200"
+            >
+              <table className="min-w-full text-left text-sm">
+                <caption className="sr-only">Audit list of flagged and unparseable rows</caption>
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-semibold">
+                      Row #
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-semibold">
+                      Field
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-semibold">
+                      Reason
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-semibold">
+                      Raw value
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visibleRows.map((r, i) => (
+                    <tr key={`${r.row_index}-${r.field}-${i}`}>
+                      <td className="px-4 py-3 tabular-nums text-slate-700">{r.row_index}</td>
+                      <td className="px-4 py-3 text-slate-700">{fieldWord(r.field)}</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                          {humanize(r.reason)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                        {r.raw_value === '' || r.raw_value == null ? '—' : r.raw_value}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {rowsCapped && (
+              <div className="mt-3 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setShowAllRows((v) => !v)}
+                  data-testid="data-quality-toggle"
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                >
+                  {showAllRows ? `Show first ${DEFAULT_VISIBLE}` : `Show all ${intFmt(rowsTotal)} rows`}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>

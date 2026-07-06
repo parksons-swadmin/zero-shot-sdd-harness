@@ -26,7 +26,7 @@ Re-sending the file over loopback (localhost) is negligible for a local desktop 
 ## Entities (in-memory Pydantic models, `src/domain/`)
 
 ### Entity: `ColumnMapping`
-Confirmed mapping from the six canonical fields to source columns.
+Confirmed mapping from the six canonical fields to source columns, plus one optional field.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -36,6 +36,7 @@ Confirmed mapping from the six canonical fields to source columns.
 | due_date | str | yes | Source column for due date |
 | amount | str | yes | Source column for outstanding balance |
 | employee | str | yes | Source column for salesperson |
+| hod | str \| None = None | no | Source column for HoD Name (Head of Department / salesperson's manager); `None` when unmapped |
 
 ### Entity: `FieldMatch` (preview output)
 | Field | Type | Required | Description |
@@ -57,6 +58,7 @@ One parsed invoice after the mapping is applied.
 | due_date | date \| null | no | Parsed; null when unparseable (flagged) |
 | amount_paise | int | yes | Amount as exact integer paise (see exactness rule) |
 | employee | str | yes | `"(blank)"` when source is empty |
+| hod | str \| null | no | Head-of-Department text for the row; `null` when `hod` is unmapped or the source cell is blank |
 | dpd | int \| null | no | Days past due at `as_of`; null when due_date null |
 | bucket | enum `current`\|`0-30`\|`31-60`\|`61-90`\|`90+`\|`unclassified` | yes | `unclassified` when due_date null |
 
@@ -85,7 +87,7 @@ One parsed invoice after the mapping is applied.
 ### Value objects
 - `BucketTotals`: `current`, `b_0_30`, `b_31_60`, `b_61_90`, `b_90_plus` — each a ₹ number (from exact paise).
 - `CustomerOverdue`: `customer`, `overdue_amount`, `outstanding_amount`.
-- `EmployeeSummary`: `employee`, `total_outstanding`, `total_overdue`, `pct_overdue`, `worst_bucket`, `invoice_count`.
+- `EmployeeSummary`: `employee`, `total_outstanding`, `total_overdue`, `pct_overdue`, `worst_bucket`, `invoice_count`, and optional `hod: str | None` = the Head-of-Department for that employee (the most-common non-blank `hod` among that employee's rows; `None` when `hod` is unmapped or all-blank for the employee).
 - `CustomerBreakdown` / `EmployeeBreakdown`: `key`, `bucket_totals`, `weighted_avg_days_overdue` (float \| null), `pct_overdue`, `total_outstanding`.
 - `RiskFlag`: `customer`, `reason`, `amount`, `bucket`.
 - `QualityFlag`: `row_index`, `field`, `reason`, `raw_value`.

@@ -6,14 +6,24 @@
 // (2) A per-customer breakdown table: the five bucket amounts, % overdue, and the
 //     amount-weighted average days-overdue ("—" when the customer has no overdue).
 
+import { useState } from 'react'
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { inr, pct, dpd } from '@/lib/format'
+import { inr, pct, dpd, intFmt } from '@/lib/format'
 import type { BucketTotals, GroupBreakdown } from '@/lib/types'
 
 interface AgingBreakdownProps {
   bucketTotals: BucketTotals
   customerBreakdown: GroupBreakdown[]
 }
+
+// The per-customer table renders the TOP customers by outstanding (the backend
+// already ranks customer_breakdown outstanding-desc). Rendering all rows at once
+// on a real export (1000+ customers) commits tens of thousands of DOM nodes in one
+// synchronous pass — that freezes the page for seconds and can leave the Recharts
+// chart above it measuring a stale/zero size (perceived as a blank chart). Capping
+// the table to the top N keeps the page fast; a "Show all" control still exposes
+// every row on demand.
+const DEFAULT_VISIBLE = 25
 
 // The five bucket segments, in aging order. Older = deeper red; current = cool.
 const SEGMENTS: { key: keyof BucketTotals; label: string; color: string }[] = [
@@ -52,6 +62,11 @@ function ChartTooltip({ active, payload }: TipProps) {
 }
 
 export default function AgingBreakdown({ bucketTotals, customerBreakdown }: AgingBreakdownProps) {
+  const [showAll, setShowAll] = useState(false)
+  const total = customerBreakdown.length
+  const isCapped = total > DEFAULT_VISIBLE
+  const visibleRows = showAll ? customerBreakdown : customerBreakdown.slice(0, DEFAULT_VISIBLE)
+
   const chartData = [
     {
       name: 'All accounts',
@@ -110,14 +125,24 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
 
       {/* Per-customer breakdown table */}
       <div className="mt-6">
-        <h4 className="mb-2 text-sm font-semibold text-slate-700">Per-customer breakdown</h4>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-700">Per-customer breakdown</h4>
+          {isCapped && (
+            <span className="text-xs text-slate-500" data-testid="customer-breakdown-count">
+              Showing top {intFmt(visibleRows.length)} of {intFmt(total)} customers by outstanding
+            </span>
+          )}
+        </div>
         {customerBreakdown.length === 0 ? (
           <p className="rounded-lg bg-slate-50 p-6 text-center text-sm text-slate-500">
             No customer balances to break down.
           </p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full text-left text-sm">
+            <table
+              data-testid="customer-breakdown-table"
+              className="min-w-full text-left text-sm"
+            >
               <caption className="sr-only">Per-customer aging bucket amounts</caption>
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
@@ -138,7 +163,7 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {customerBreakdown.map((c) => {
+                {visibleRows.map((c) => {
                   const isBlank = c.key === '(blank)'
                   return (
                     <tr key={c.key}>
@@ -164,6 +189,19 @@ export default function AgingBreakdown({ bucketTotals, customerBreakdown }: Agin
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {isCapped && (
+          <div className="mt-3 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              data-testid="customer-breakdown-toggle"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              {showAll ? `Show top ${DEFAULT_VISIBLE}` : `Show all ${intFmt(total)} customers`}
+            </button>
           </div>
         )}
       </div>

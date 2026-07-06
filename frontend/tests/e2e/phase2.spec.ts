@@ -30,6 +30,9 @@ test('upload → confirm → dashboard renders Phase-2 employee/breakdown/flags 
   await expect(firstEmployeeRow).toContainText('Ravi')
   // The blank-employee invoice is a real row, not an empty state.
   await expect(employeeTable).toContainText('(blank)')
+  // Optional HoD column is present. ar_small has no HoD column, so cells render "—",
+  // but the header must exist so a real file with a mapped HoD lands somewhere.
+  await expect(employeeTable.locator('thead')).toContainText('HoD Name')
 
   // --- Aging breakdown ---
   const agingBreakdown = page.getByTestId('aging-breakdown')
@@ -48,6 +51,14 @@ test('upload → confirm → dashboard renders Phase-2 employee/breakdown/flags 
   // Zenith Ltd has zero overdue → its weighted-avg days cell shows the em-dash "—".
   const zenithRow = agingBreakdown.locator('tbody tr', { hasText: 'Zenith' })
   await expect(zenithRow).toContainText('—')
+  // The per-customer breakdown table is capped: it renders a bounded number of rows,
+  // never the full 1000+ of a real export (which froze the dashboard render). The
+  // small fixture has 5 customers, so it renders those without a cap.
+  const custTable = page.getByTestId('customer-breakdown-table')
+  await expect(custTable).toBeVisible()
+  const custRowCount = await custTable.locator('tbody tr').count()
+  expect(custRowCount).toBeGreaterThan(0)
+  expect(custRowCount).toBeLessThan(1000)
 
   // --- Risk flags + data-quality audit ---
   const flagsPanel = page.getByTestId('flags-panel')

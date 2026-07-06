@@ -33,13 +33,25 @@ SYNONYM_SEEDS: dict[str, list[str]] = {
 
 CANONICAL_FIELDS: list[str] = list(SYNONYM_SEEDS.keys())
 
+# Optional 7th field — kept OUT of CANONICAL_FIELDS so it never gates the
+# "all required mapped" check. The bare "hod name" seed is intentionally
+# omitted: its "name" token false-matches unrelated "* Name" columns (e.g.
+# "Cust Name" / "Payer Name"); the "hod" seed already matches "HoD Name" at a
+# high score, so this keeps the standard 60 cutoff clean.
+HOD_SYNONYM_SEEDS: list[str] = ["hod", "head of department", "department head", "reporting manager"]
+
 _LOW_CUTOFF = 60  # score < this -> unmatched
 
 
-def _best_score(header: str, field: str) -> int:
-    """Best WRatio score of a header against a field's synonym seeds (0-100)."""
+def _best_against(header: str, seeds: list[str]) -> int:
+    """Best WRatio score of a header against a list of synonym seeds (0-100)."""
     header_l = header.lower()
-    return round(max(fuzz.WRatio(header_l, seed.lower()) for seed in SYNONYM_SEEDS[field]))
+    return round(max(fuzz.WRatio(header_l, seed.lower()) for seed in seeds))
+
+
+def _best_score(header: str, field: str) -> int:
+    """Best WRatio score of a header against a canonical field's seeds (0-100)."""
+    return _best_against(header, SYNONYM_SEEDS[field])
 
 
 def detect_mapping(columns: list[str]) -> list[FieldMatch]:
@@ -78,4 +90,31 @@ def detect_mapping(columns: list[str]) -> list[FieldMatch]:
                 FieldMatch(field=field, matched_column=best_col, confidence=best_score, status="low")
             )
 
+    hod_match = _detect_hod(columns, threshold)
+    if hod_match is not None:
+        matches.append(hod_match)
+
     return matches
+
+
+def _detect_hod(columns: list[str], threshold: int) -> FieldMatch | None:
+    """Propose an OPTIONAL ``hod`` column, or ``None`` when no plausible column.
+
+    Fully separate from the six required canonical fields: it is emitted only
+    when a column scores at or above the low cutoff, and its presence never
+    affects the "all six required mapped" gate. A ``low`` proposal is fine — the
+    user confirms/corrects it and it never blocks compute.
+    """
+    best_col: str | None = None
+    best_score = -1
+    for col in columns:
+        score = _best_against(col, HOD_SYNONYM_SEEDS)
+        if score > best_score:
+            best_score = score
+            best_col = col
+
+    if best_col is None or best_score < _LOW_CUTOFF:
+        return None
+
+    status = "high" if best_score >= threshold else "low"
+    return FieldMatch(field="hod", matched_column=best_col, confidence=best_score, status=status)

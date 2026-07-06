@@ -137,10 +137,40 @@ def _weighted_avg_days(wnum_paise: int, overdue_paise: int) -> float | None:
     return round(wnum_paise / overdue_paise, 2)
 
 
+def _employee_hods(df: pd.DataFrame) -> dict[str, str]:
+    """Most-common non-blank HoD per employee (deterministic).
+
+    Ties on frequency are broken by the lexicographically smallest HoD for
+    reproducibility. Employees with no non-blank HoD are absent from the result
+    (callers treat a missing key as ``None``), which covers both the unmapped
+    (all-None ``hod`` column) and the all-blank-for-this-employee cases.
+    """
+    if "hod" not in df.columns:
+        return {}
+
+    counts: dict[str, dict[str, int]] = {}
+    for emp, hod in zip(df["employee"].astype(str), df["hod"]):
+        # Skip None and NaN (a plain-list column build could coerce None->NaN;
+        # str(NaN) == "nan" must never be counted as a HoD name).
+        if hod is None or (isinstance(hod, float) and pd.isna(hod)):
+            continue
+        text = str(hod).strip()
+        if not text:
+            continue
+        counts.setdefault(emp, {})
+        counts[emp][text] = counts[emp].get(text, 0) + 1
+
+    return {
+        emp: min(by_hod.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+        for emp, by_hod in counts.items()
+    }
+
+
 def _employee_summaries(df: pd.DataFrame) -> list[EmployeeSummary]:
     """Ranked employee rollups: outstanding desc, overdue desc, employee asc."""
     records = _partition_records(df, "employee")
     records.sort(key=lambda r: (-r["outstanding"], -r["overdue"], r["key"]))
+    hod_by_employee = _employee_hods(df)
     return [
         EmployeeSummary(
             employee=r["key"],
@@ -149,6 +179,7 @@ def _employee_summaries(df: pd.DataFrame) -> list[EmployeeSummary]:
             pct_overdue=_pct_overdue(r["overdue"], r["outstanding"]),
             worst_bucket=_worst_bucket(r["buckets"], r["has_overdue"]),
             invoice_count=r["invoice_count"],
+            hod=hod_by_employee.get(r["key"]),
         )
         for r in records
     ]

@@ -6,7 +6,12 @@ from domain.quality import QualityFlag
 
 
 class ColumnMapping(BaseModel):
-    """Confirmed mapping from the six canonical fields to source column names."""
+    """Confirmed mapping from the six canonical fields to source column names.
+
+    ``hod`` (Head of Department / the salesperson's manager) is a strictly
+    OPTIONAL seventh field: it never gates compute, defaults to ``None`` when
+    unmapped, and is not part of the six required canonical fields.
+    """
 
     customer: str
     invoice_no: str
@@ -14,8 +19,15 @@ class ColumnMapping(BaseModel):
     due_date: str
     amount: str
     employee: str
+    hod: str | None = None
 
     def as_dict(self) -> dict[str, str]:
+        """The six REQUIRED canonical field → column mappings.
+
+        Intentionally excludes the optional ``hod`` so every consumer
+        (validation, normalization, duplicate detection) treats only the six as
+        required. Read ``mapping.hod`` directly for the optional field.
+        """
         return {
             "customer": self.customer,
             "invoice_no": self.invoice_no,

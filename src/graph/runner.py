@@ -138,6 +138,17 @@ def _validate_mapping(mapping: ColumnMapping, columns: list[str]) -> None:
             )
         seen[col] = field
 
+    # Optional 7th field: absent/None is always fine and never required. When
+    # provided it must reference a real column (else BAD_MAPPING); it is not
+    # subject to the duplicate-column rule (the six canonical fields are).
+    if mapping.hod is not None and str(mapping.hod).strip():
+        if mapping.hod not in available:
+            raise PipelineError(
+                "BAD_MAPPING",
+                f"Field 'hod' is mapped to '{mapping.hod}', which is not a column in the sheet.",
+                400,
+            )
+
 
 def run_analysis(
     *,

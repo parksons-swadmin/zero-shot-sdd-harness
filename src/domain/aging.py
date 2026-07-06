@@ -24,7 +24,12 @@ class CustomerOverdue(BaseModel):
 
 
 class EmployeeSummary(BaseModel):
-    """Per-employee (salesperson) rollup for the ranked employee table (Phase 2)."""
+    """Per-employee (salesperson) rollup for the ranked employee table (Phase 2).
+
+    ``hod`` (Head of Department for that employee) is the most-common non-blank
+    HoD among the employee's rows; it defaults to ``None`` so the wire shape
+    stays stable when ``hod`` is unmapped or blank for the employee.
+    """
 
     employee: str
     total_outstanding: float
@@ -32,6 +37,7 @@ class EmployeeSummary(BaseModel):
     pct_overdue: float
     worst_bucket: str
     invoice_count: int
+    hod: str | None = None
 
 
 class CustomerBreakdown(BaseModel):

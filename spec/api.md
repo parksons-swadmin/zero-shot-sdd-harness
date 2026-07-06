@@ -34,12 +34,15 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
     {"field": "invoice_date", "matched_column": "Inv. Date",           "confidence": 86, "status": "high"},
     {"field": "due_date",     "matched_column": "Due Dt",              "confidence": 72, "status": "low"},
     {"field": "amount",       "matched_column": "Balance Outstanding", "confidence": 91, "status": "high"},
-    {"field": "employee",     "matched_column": "Sales Person",        "confidence": 95, "status": "high"}
+    {"field": "employee",     "matched_column": "Sales Person",        "confidence": 95, "status": "high"},
+    {"field": "hod",          "matched_column": "HoD Name",            "confidence": 70, "status": "low"}
   ],
   "preview_rows": [{"Cust Name": "Acme Corp", "Invoice #": "INV-1", "...": "..."}],
   "parse_flags": [{"row_index": 7, "field": "due_date", "reason": "missing", "raw_value": ""}]
 }
 ```
+
+> `proposed_mapping` MAY include an optional 7th `hod` (Head-of-Department) entry, auto-detected from headers like "HoD Name"; it is **optional and low-confidence is fine** — it is never one of the six required fields and never blocks Confirm. Omitted when no plausible HoD column is found.
 
 **Error cases:**
 | Status | Condition |
@@ -60,7 +63,7 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 |------|------|----------|
 | file | `.xlsx` file (re-sent) | yes |
 | sheet_name | string | no |
-| mapping | JSON string — `{customer, invoice_no, invoice_date, due_date, amount, employee}` → source column names | yes |
+| mapping | JSON string — `{customer, invoice_no, invoice_date, due_date, amount, employee}` (all required) → source column names, **plus** an optional `hod` key (nullable/omittable) | yes |
 
 **Response `data` (`DashboardResult`) — Phase 1 fields:**
 ```json
@@ -82,7 +85,7 @@ REST, JSON + multipart. New router `src/api/analysis.py` (replaces the skeleton'
 }
 ```
 
-**Phase 2** additionally populates `employees`, `customer_breakdown`, `employee_breakdown`, `risk_flags`, and `data_quality.rows`. Phase-1 responses omit or null these; the frontend shows labelled stubs.
+**Phase 2** additionally populates `employees`, `customer_breakdown`, `employee_breakdown`, `risk_flags`, and `data_quality.rows`. Phase-1 responses omit or null these; the frontend shows labelled stubs. Each `EmployeeSummary` in `employees` also carries an optional `hod: string | null` (the Head-of-Department name for that employee; `null` when `hod` is unmapped or blank for that employee).
 
 **Reference date:** `as_of` is `date.today()` unless the server is started with `AGENT_AS_OF` set (a server-level reproducibility override; see [architecture.md](architecture.md) Settings). There is **no per-request `as_of` field** on the API.
 

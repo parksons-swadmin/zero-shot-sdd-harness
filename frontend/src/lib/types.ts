@@ -24,8 +24,13 @@ export const FIELD_LABELS: Record<CanonicalField, string> = {
 
 export type MatchStatus = 'high' | 'low' | 'unmatched'
 
+/**
+ * A proposed mapping entry. `field` is normally one of the six canonical fields,
+ * but the backend MAY also return an entry for the OPTIONAL `hod` (Head of
+ * Department) column — it is never one of the required six and never gates Confirm.
+ */
 export interface FieldMatch {
-  field: CanonicalField
+  field: CanonicalField | 'hod'
   matched_column: string | null
   confidence: number
   status: MatchStatus
@@ -85,6 +90,8 @@ export interface EmployeeSummary {
   pct_overdue: number
   worst_bucket: Bucket
   invoice_count: number
+  /** Head of Department for the employee — present only when `hod` was mapped; null/absent otherwise. */
+  hod?: string | null
 }
 
 /** Per-group (customer or employee) aging breakdown + weighted-avg days overdue (Phase 2). */
@@ -126,5 +133,10 @@ export interface DashboardResult {
   risk_flags?: RiskFlag[]
 }
 
-/** The mapping payload sent to /api/compute (canonical field -> source column). */
-export type Mapping = Record<CanonicalField, string>
+/**
+ * The mapping payload sent to /api/compute (canonical field -> source column).
+ * The six canonical fields are always required strings; `hod` is an OPTIONAL
+ * seventh field (Head of Department) that never gates Confirm & Compute and is
+ * sent only when the user picks a column.
+ */
+export type Mapping = Record<CanonicalField, string> & { hod?: string | null }
