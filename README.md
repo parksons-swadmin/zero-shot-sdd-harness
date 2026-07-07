@@ -87,6 +87,26 @@ started with e.g. `PORT=8011 uv run python -m src` without disturbing the defaul
 
 ---
 
+## Scheduled daily email report (optional)
+
+An optional Windows ops job renders the dashboard for the newest `.xlsx` in a watched folder
+and emails it as a PDF once a day. It starts its **own short-lived backend on an ephemeral
+port** — it never touches your `:8001` server — and it is **disabled by default**: until you
+configure SMTP it runs in dry-run mode (saves the PDF locally, sends nothing).
+
+```bash
+# dry-run: render + save a PDF under frontend/scripts/output/ (no email)
+node frontend/scripts/daily-report.mjs --dry-run
+
+# register a daily Windows task at noon (see docs for options)
+powershell -ExecutionPolicy Bypass -File scripts\register-daily-report-task.ps1
+```
+
+Full setup, `.env` keys, and the IT note (enable Authenticated SMTP + app password) are in
+[docs/daily-report.md](docs/daily-report.md).
+
+---
+
 ## Testing
 
 The "real path" is the deterministic pandas pipeline over real `.xlsx` fixtures — there is no
@@ -137,4 +157,7 @@ spec/             ← roadmap, architecture, capabilities/, data, api, ui
 - **`.xls`, `.csv`, `.pdf`** ingestion — `.xlsx` only.
 - **No LLM / AI commentary** — every number is deterministic pandas arithmetic.
 - **No persistence** — no database, no history, no saved sessions, no login.
-- **No network egress of any kind** — fully offline; the uploaded file never leaves the machine.
+- **No network egress from the dashboard** — the interactive app is fully offline; the uploaded
+  file never leaves the machine. The **only** exception is the optional, opt-in daily email
+  report (above), which you explicitly configure with your own SMTP credentials and which emails
+  a rendered PDF to your own address — it is off (dry-run) until you set it up.

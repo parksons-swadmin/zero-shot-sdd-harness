@@ -25,3 +25,8 @@ tests/fixtures/expected_large.json
 # User-supplied REAL AR data — confidential customer names/balances. NEVER commit.
 tests/fixtures/AR 2nd July 2026.xlsx
 tests/fixtures/*real*.xlsx
+
+# Daily-report job artifacts — generated PDFs (may contain confidential AR data) and
+# the run log. NEVER commit. (*.log above already covers the log; listed explicitly.)
+frontend/scripts/output/
+scripts/daily-report.log

@@ -22,12 +22,13 @@ A single, discrete behaviour of the dashboard — e.g. "compute the exact aging 
 | Print-ready PDF Export | 3 | [pdf_export.md](pdf_export.md) |
 | Large-file Progress Feedback | 3 | [large_file_progress.md](large_file_progress.md) |
 | Invoice Drill-down (row-level view + filters) | 4 | [invoice_drilldown.md](invoice_drilldown.md) |
+| Scheduled Daily Email Report (opt-in) | 5 | [scheduled_email_report.md](scheduled_email_report.md) |
 
 ## Explicitly NOT a Capability (out of scope)
 
 - **DSO (Days Sales Outstanding)** — no sales/turnover column exists in the input; it is never computed, faked, or added as a future capability. See [roadmap.md](../roadmap.md).
 - **`.xls` / `.csv` / `.pdf` ingestion** — this build accepts `.xlsx` only.
-- **Persistence / history / multi-file / login / auto-watch** — the tool is stateless, one file at a time.
+- **Persistence / history / multi-file / login** — the interactive tool is stateless, one file at a time, and **never auto-watches a folder**. (The opt-in Phase-5 [scheduled email job](scheduled_email_report.md) does watch a folder on a schedule to email a report — still one file at a time, still persisting nothing beyond the sent email + PDF + logs.)
 - **Any LLM / AI-generated commentary** — every number is deterministic pandas arithmetic.
 
 ## How to Add a New Capability

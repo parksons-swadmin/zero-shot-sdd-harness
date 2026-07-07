@@ -4,7 +4,7 @@
 
 ## What This Agent Does
 
-A fully-local, deterministic desktop dashboard for **Accounts Receivable (AR) aging**. The user uploads an AR aging export (`.xlsx`), the tool auto-detects the six required columns and asks the user to confirm the mapping, then computes exact AR aging metrics with pandas and renders an interactive browser dashboard — KPI tiles, a Top-20-customers-by-overdue chart, employee summaries, aging breakdowns, proactive risk flags, and Excel/PDF exports. **Nothing leaves the machine:** no LLM, no external API, no database, no network egress.
+A fully-local, deterministic desktop dashboard for **Accounts Receivable (AR) aging**. The user uploads an AR aging export (`.xlsx`), the tool auto-detects the six required columns and asks the user to confirm the mapping, then computes exact AR aging metrics with pandas and renders an interactive browser dashboard — KPI tiles, a Top-20-customers-by-overdue chart, employee summaries, aging breakdowns, proactive risk flags, and Excel/PDF exports. **Nothing leaves the machine** (interactive app): no LLM, no external API, no database, no network egress. One deliberate, opt-in exception — the Phase-5 [scheduled email report](capabilities/scheduled_email_report.md) — is the single authorized egress path (off unless SMTP is configured).
 
 ## Who Uses It
 
@@ -21,20 +21,20 @@ Today this analysis is done by hand in Excel with pivot tables and manual formul
 - [ ] Auto-detection maps the six fields; low-confidence headers are flagged for the user to confirm before compute.
 - [ ] A ≥60,000-row file is handled gracefully and its totals tie out (no sampling/truncation).
 - [ ] Employee summary, aging breakdown + weighted-avg-days-overdue, proactive flags, and Excel + PDF export all work (by end of Phase 3).
-- [ ] No network call is ever made; no data is persisted.
+- [ ] The interactive app makes no network call and persists no data. (The opt-in Phase-5 scheduled email report is the single, explicitly-authorized egress path — off unless SMTP is configured.)
 
 ## What This Agent Does NOT Do (Out of Scope)
 
 - **DSO (Days Sales Outstanding)** — no sales/turnover column exists in the input. It is **never** computed, faked, or added later.
 - **`.xls`, `.csv`, `.pdf`** ingestion — `.xlsx` only for this build.
 - **No LLM / AI commentary** — every number is deterministic pandas arithmetic.
-- **No persistence** — no database, no history, no saved sessions, no multi-file, no auto-watch, no login.
-- **No network egress of any kind** — fully offline.
+- **No persistence / no auto-watch in the interactive app** — no database, no history, no saved sessions, no multi-file, no login; the interactive app never watches a folder. (The opt-in Phase-5 [scheduled email report](capabilities/scheduled_email_report.md) picks the newest file from a watched folder on a schedule — still one file at a time, still persisting nothing beyond the sent email + PDF + logs.)
+- **No network egress from the interactive app** — fully offline. The single authorized egress is the opt-in Phase-5 scheduled email report (SMTP), which sends the report PDF only when the user configures SMTP; see [scheduled_email_report.md](capabilities/scheduled_email_report.md).
 
 ## Key Constraints
 
 - **Correctness is paramount:** every number ties out exactly (integer paise; no float drift, no rounding that changes totals, no sampling).
-- **Fully local & stateless:** one file at a time, fresh every upload, nothing persisted, nothing sent anywhere.
+- **Fully local & stateless (interactive app):** one file at a time, fresh every upload, nothing persisted, nothing sent anywhere. The opt-in Phase-5 email report is the one authorized exception that sends the report PDF out via SMTP.
 - **Currency:** ₹ INR with Indian lakh/crore digit grouping.
 - **Deterministic:** identical input → identical output; tests inject a fixed `as_of` date so aging buckets are reproducible.
 - **No LLM, no API keys:** `.env` needs no provider keys (none exist). The "real path" the gates exercise is the **real deterministic pandas pipeline over real `.xlsx` fixtures** — there is no external API to call.
@@ -157,3 +157,25 @@ Deterministically generated with a **seeded** RNG (reproducible). **High-value r
      - **full-data / no-sampling gate:** an unfiltered call on `ar_large.xlsx` (≥60,000 rows) returns `len(invoices) == AGENT_DRILLDOWN_MAX_ROWS`, `truncated=true`, `total_count` == the fixture's real-data `row_count`, and `subtotal_amount` == the `/api/compute` `total_outstanding` (exact) — a capped page whose reported totals still cover the full set (sample ≠ full).
   2. from `frontend/`: `npx playwright test tests/e2e/ --reporter=line` — E2E after upload→map→compute on `ar_small.xlsx`: clicking **Drill down** reveals the inline section (asserted present, not a modal overlay); typing `Bea` in the customer picker filters the options and selecting **Beacon & Co** loads its invoice rows with the subtotal line `Beacon & Co — N invoices · ₹…`; clicking the **Amount** / **Days overdue** column header re-sorts the rows; clicking an **employee row** in the employee table opens the drill-down with that employee pre-selected in the filter.
 - **How the user tests it (handoff seed):** rebuild + boot (`cd frontend; pnpm build; cd ..; uv run python -m src`); open http://localhost:8001/app/; upload `tests/fixtures/ar_small.xlsx`, confirm the mapping. On the dashboard click **Drill down** to open the inline section; type `Bea` in the customer picker and pick **Beacon & Co** — the table lists its invoices and the subtotal reads `Beacon & Co — N invoices · ₹…`; click the **Days overdue** header to sort. Then click an employee row (e.g. **Ravi**) in the employee-wise summary — the drill-down opens pre-filtered to Ravi. Optionally upload `tests/fixtures/ar_large.xlsx` and open the drill-down with no filter: you see the first 1,000 rows plus a "Showing first 1,000 of M — pick a customer or employee to see them all" prompt, while the subtotal still reports the true full total.
+
+### Phase 5 — Scheduled daily email report *(opt-in; the single authorized egress)*
+
+- **Goal:** An **opt-in** daily job on the user's laptop picks the newest AR `.xlsx` from a watched folder, computes the dashboard, renders it to a **PDF** (light print layout), and **emails the PDF**. This is the tool's **single, explicitly-authorized network-egress path** — it deliberately sends confidential AR data out via SMTP; the interactive app stays fully local. Without SMTP configured (or with `--dry-run`) it renders + saves the PDF locally and sends nothing, so it is fully testable without credentials. *(A single-capability incremental-enhancement phase, like Phases 3.1/3.2/4 — not a greenfield multi-capability phase. It reuses the Phase 1–3.1 pipeline + auto-skip and the Phase-3 print machinery; **no engine rewrite**.)*
+- **Capability:** [scheduled_email_report](capabilities/scheduled_email_report.md).
+- **Independent slices (parallel build units):**
+  - `report-job` — **deps: none** (reuses the existing app, the auto-skip flow, and the print stylesheet as-is; builds against the [api.md](api.md) / [ui.md](ui.md) contracts). One cohesive unit — a standalone Node/Playwright + `nodemailer` job that boots its own backend, drives upload → auto-skip → dashboard → print → `page.pdf()`, then emails (or dry-runs) — plus its launcher, the Windows Scheduled Task setup, and the new report/SMTP settings. Splitting it would only manufacture a dependency (the task setup binds to the script's invocation contract), so it is honestly one slice — consistent with the single-capability precedent of Phases 3.1/3.2.
+- **Key surfaces / files:**
+  - `frontend/scripts/daily-report.mjs` (new) — the Node/Playwright + `nodemailer` job: newest-`.xlsx` selection (ignore `~$*`), boot backend on an isolated port, headless render to PDF via the print layout, SMTP send or dry-run, structured logs (password never logged).
+  - `frontend/package.json` (+`nodemailer` dependency). The job uses the already-present `@playwright/test` Chromium API and is invoked directly via `node frontend/scripts/daily-report.mjs [--dry-run]` (run from the repo root) — there are no dedicated pnpm scripts.
+  - `scripts/register-daily-report-task.ps1` (new) — registers a Windows Scheduled Task (daily 12:00 PM; `Register-ScheduledTask` / `New-ScheduledTaskTrigger -Daily -At 12:00PM`) that runs the job under the user account; documents the on/awake requirement.
+  - `.env.example` (+`AGENT_REPORT_WATCH_DIR`, `AGENT_REPORT_TO`, `AGENT_REPORT_FROM`, `AGENT_SMTP_HOST`, `AGENT_SMTP_PORT`, `AGENT_SMTP_USER`, `AGENT_SMTP_PASSWORD` — placeholders only, **no secret value committed**). See the Scheduled-report settings in [architecture.md](architecture.md#settings-agent_-prefix-srcconfigsettingspy).
+  - Watch dir supplied at runtime via `AGENT_REPORT_WATCH_DIR` — there is **no committed `tests/fixtures/report_watch/`**. The dry-run gate creates (or points at) a temp dir and seeds it with a copy of `tests/fixtures/ar_standard.xlsx` (the auto-mappable standard-header fixture from Phase 3.1) so the run lands on the dashboard via auto-skip.
+- **Gate command (all must pass; the interactive app stays no-egress; the dry-run makes no network call):**
+  1. `cd frontend; pnpm build` — the static export (`frontend/out/`) exists; the job renders the built `/app`.
+  2. `node frontend/scripts/daily-report.mjs --dry-run` (run from the repo root) — runs the job in **forced dry-run**. The gate sets `AGENT_REPORT_WATCH_DIR` to a temp/fixture dir seeded with a copy of `tests/fixtures/ar_standard.xlsx` (so no committed watch folder is needed) and, being `--dry-run`, never uses SMTP env or attempts a send; `AGENT_AS_OF=2026-01-15` is set for a deterministic render. The job boots the backend on an isolated port, drives upload → auto-skip → dashboard → `emulateMedia('print')` → `page.pdf()`, writes a **non-empty PDF**, and logs the dry-run line (stable step `dry_run`: `"SMTP not configured — PDF saved, send skipped"`). The script **exits 0 on success and non-zero if the PDF is missing or empty**, so the command producing a non-empty PDF + exit 0 IS the gate; no SMTP connection is opened.
+- **How the user tests it (handoff seed):**
+  1. Build once: `cd frontend; pnpm build; cd ..`.
+  2. **Dry-run without creds:** `node frontend/scripts/daily-report.mjs --dry-run` (run from the repo root; or point at your own folder: `node frontend/scripts/daily-report.mjs --dry-run --watch-dir "D:\Cowork\AR Dashboard Data"`). A PDF is written locally and the log reads `"SMTP not configured — PDF saved, send skipped"`. Open it — it's the dashboard in the light print layout for the newest file in the folder.
+  3. **Configure email** in repo-root `.env` (never commit it): `AGENT_SMTP_HOST=smtp.office365.com`, `AGENT_SMTP_PORT=587`, `AGENT_SMTP_USER=<you>@parksonspackaging.com`, `AGENT_SMTP_PASSWORD=<app password>`, `AGENT_REPORT_FROM=<you>@parksonspackaging.com`, `AGENT_REPORT_TO=sabyasachi.thakur@parksonspackaging.com`, `AGENT_REPORT_WATCH_DIR=D:\Cowork\AR Dashboard Data`. Then run `node frontend/scripts/daily-report.mjs` (no `--dry-run`) from the repo root — the script loads the repo-root `.env` itself → the report lands in the inbox with the PDF attached.
+  4. **Schedule it:** run `scripts/register-daily-report-task.ps1` once to register the daily 12:00 PM task; keep the laptop on/awake at noon and drop the day's AR `.xlsx` in the watched folder — the report emails itself.
+  5. **Note (not a bug):** the folder's newest file must be an auto-mappable (standard-header) export. If its columns aren't confidently recognized, the job logs the `mapping_not_auto` step (`"file not auto-mappable; skipping"`) and sends nothing — a scheduled job can't do interactive mapping.
