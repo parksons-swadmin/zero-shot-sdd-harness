@@ -65,6 +65,11 @@ test('drill down → pick a customer → their invoices + subtotal tie out', asy
   // A filtered result returns ALL matching rows → no truncated banner.
   await expect(page.getByTestId('drilldown-truncated')).toHaveCount(0)
 
+  // A footer total row sums the Amount Due column over the full filtered set.
+  await expect(page.getByTestId('drilldown-total-row')).toBeVisible()
+  await expect(page.getByTestId('drilldown-total-amount')).toContainText('₹')
+  await expect(page.getByTestId('drilldown-total-row')).toContainText(`${rowCount} invoice`)
+
   // Sorting: click the "Amount due" header → rows reorder largest-first (desc default).
   await page.getByTestId('drilldown-sort-amount').click()
   await expect(page.locator('th[aria-sort="descending"]')).toContainText(/Amount due/i)

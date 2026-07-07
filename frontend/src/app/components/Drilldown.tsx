@@ -422,6 +422,23 @@ export default function Drilldown({
                   </tr>
                 ))}
               </tbody>
+              {/* Total row — sums the Amount Due column over the FULL filtered set
+                  (data.subtotal_amount / total_count), so it stays exact even when the
+                  rendered rows are capped. */}
+              <tfoot className="border-t-2 border-slate-300 bg-slate-50 font-semibold dark:border-slate-600 dark:bg-slate-800">
+                <tr data-testid="drilldown-total-row">
+                  <td colSpan={2} className="px-4 py-3 text-slate-900 dark:text-slate-100">
+                    Total · {intFmt(data.total_count)} invoice{data.total_count === 1 ? '' : 's'}
+                  </td>
+                  <td
+                    data-testid="drilldown-total-amount"
+                    className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-slate-100"
+                  >
+                    {inr(data.subtotal_amount)}
+                  </td>
+                  <td colSpan={3} className="px-4 py-3" />
+                </tr>
+              </tfoot>
             </table>
           </div>
 
